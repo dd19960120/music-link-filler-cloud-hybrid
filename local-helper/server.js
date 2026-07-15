@@ -1384,11 +1384,11 @@ function qishuiSongStats(song) {
   };
 }
 
-function qishuiMergeStats(primary, fallback) {
+function qishuiMergeStats(apiStats, shareStats) {
   return {
-    likeCount: primary.likeCount !== "" ? primary.likeCount : (fallback.likeCount ?? ""),
-    commentCount: primary.commentCount !== "" ? primary.commentCount : (fallback.commentCount ?? ""),
-    shareCount: primary.shareCount !== "" ? primary.shareCount : (fallback.shareCount ?? ""),
+    likeCount: shareStats.likeCount !== "" ? shareStats.likeCount : (apiStats.likeCount ?? ""),
+    commentCount: shareStats.commentCount !== "" ? shareStats.commentCount : (apiStats.commentCount ?? ""),
+    shareCount: shareStats.shareCount !== "" ? shareStats.shareCount : (apiStats.shareCount ?? ""),
   };
 }
 
