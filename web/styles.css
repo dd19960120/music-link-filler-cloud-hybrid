@@ -194,6 +194,27 @@ input:focus {
   line-height: 1.5;
 }
 
+.helper-notes {
+  border: 1px solid #ead6a6;
+  border-radius: 8px;
+  background: #fffaf0;
+  color: #4d3b16;
+  font-size: 13px;
+  line-height: 1.6;
+  margin-top: 12px;
+  padding: 12px 14px;
+}
+
+.helper-notes strong {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.helper-notes ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
 .controls {
   display: grid;
   grid-template-columns: 95px 1fr;
