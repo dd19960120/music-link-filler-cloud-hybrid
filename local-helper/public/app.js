@@ -20,6 +20,7 @@ const totalCount = document.querySelector("#totalCount");
 const exactCount = document.querySelector("#exactCount");
 const reviewCount = document.querySelector("#reviewCount");
 const platformInputs = [...document.querySelectorAll('input[name="platform"]')];
+const MAX_RESULTS_PER_PLATFORM = 200;
 
 let currentRows = [];
 
@@ -212,7 +213,7 @@ async function searchSong(query, limit, platforms) {
 async function runSearch() {
   const names = parseSongNames();
   const platforms = selectedPlatforms();
-  const limit = Math.min(Math.max(Number(limitInput.value || 10), 1), 50);
+  const limit = Math.min(Math.max(Number(limitInput.value || 10), 1), MAX_RESULTS_PER_PLATFORM);
 
   if (names.length === 0) {
     setStatus("请输入歌曲名");

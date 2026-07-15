@@ -15,6 +15,7 @@ const qqDebugPort = Number(process.env.QQ_DEBUG_PORT || 9223);
 const shouldOpenBrowser = process.env.NO_OPEN !== "1" && !process.argv.includes("--no-open");
 const qishuiDeviceId = process.env.QISHUI_DEVICE_ID || "7390000000000000000";
 const qishuiInstallId = process.env.QISHUI_INSTALL_ID || "7390000000000000000";
+const MAX_RESULTS_PER_PLATFORM = 200;
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -1102,8 +1103,9 @@ async function searchQqBrowser(keyword, limit) {
     const rows = [];
     const seen = new Set();
     let stableRounds = 0;
+    const maxScrollAttempts = Math.max(12, Math.ceil(limit / 10) + 6);
 
-    for (let attempt = 0; attempt < 12 && rows.length < limit; attempt += 1) {
+    for (let attempt = 0; attempt < maxScrollAttempts && rows.length < limit; attempt += 1) {
       const evaluation = await client.send("Runtime.evaluate", {
         expression: qqExtractExpression(limit),
         returnByValue: true,
@@ -1232,7 +1234,7 @@ function runQishuiHelper(keyword, limit) {
 }
 
 async function searchQishui(keyword, limit) {
-  const rows = await runQishuiHelper(keyword, Math.min(limit, 6));
+  const rows = await runQishuiHelper(keyword, Math.min(limit, MAX_RESULTS_PER_PLATFORM));
   return rows.map((song, index) =>
     mapResult(
       {
@@ -1689,7 +1691,10 @@ async function searchPlatform(platform, keyword, limit, options) {
 async function handleApiSearch(req, res, url) {
   const body = req.method === "POST" ? await readJsonBody(req) : {};
   const q = String(body.q ?? url.searchParams.get("q") ?? "").trim();
-  const limit = Math.min(Math.max(Number(body.limit ?? url.searchParams.get("limit") ?? 10), 1), 50);
+  const limit = Math.min(
+    Math.max(Number(body.limit ?? url.searchParams.get("limit") ?? 10), 1),
+    MAX_RESULTS_PER_PLATFORM,
+  );
   const rawPlatforms = Array.isArray(body.platforms)
     ? body.platforms.join(",")
     : String(body.platforms ?? url.searchParams.get("platforms") ?? "netease");

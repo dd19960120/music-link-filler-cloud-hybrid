@@ -1,5 +1,7 @@
 import { createCipheriv, createHash, randomUUID } from "node:crypto";
 
+const MAX_RESULTS_PER_PLATFORM = 200;
+
 const platformConfig = {
   netease: { label: "网易云音乐" },
   kugou: { label: "酷狗音乐" },
@@ -355,7 +357,7 @@ export async function searchCloudPlatform(platform, keyword, limit) {
 
 export async function searchCloud({ q, platforms, limit }) {
   const keyword = String(q || "").trim();
-  const safeLimit = Math.min(Math.max(Number(limit || 10), 1), 30);
+  const safeLimit = Math.min(Math.max(Number(limit || 10), 1), MAX_RESULTS_PER_PLATFORM);
   const safePlatforms = (Array.isArray(platforms) ? platforms : String(platforms || "netease").split(","))
     .map((platform) => String(platform).trim())
     .filter(Boolean);

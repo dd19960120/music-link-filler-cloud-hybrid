@@ -1,5 +1,6 @@
 const LOCAL_HELPER = "http://127.0.0.1:5178";
 const LOCAL_PLATFORMS = new Set(["qq", "qishui"]);
+const MAX_RESULTS_PER_PLATFORM = 200;
 
 const queryInput = document.querySelector("#queryInput");
 const limitInput = document.querySelector("#limitInput");
@@ -227,7 +228,7 @@ async function searchOne(query, limit, platforms) {
 async function runSearch() {
   const queries = parseQueries();
   const platforms = selectedPlatforms();
-  const limit = Math.min(Math.max(Number(limitInput.value || 10), 1), 30);
+  const limit = Math.min(Math.max(Number(limitInput.value || 10), 1), MAX_RESULTS_PER_PLATFORM);
 
   if (queries.length === 0) {
     showNotice("请输入至少一个关键词。");
