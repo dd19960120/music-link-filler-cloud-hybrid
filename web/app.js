@@ -1,6 +1,14 @@
 const LOCAL_HELPER = "http://127.0.0.1:5178";
 const LOCAL_PLATFORMS = new Set(["qq", "qishui"]);
 const MAX_RESULTS_PER_PLATFORM = 200;
+const STATIC_HOST_RE = /(^|\.)github\.io$/i;
+const platformLabels = {
+  netease: "网易云音乐",
+  kugou: "酷狗音乐",
+  qq: "QQ 音乐",
+  kuwo: "酷我音乐",
+  qishui: "汽水音乐 App",
+};
 
 const queryInput = document.querySelector("#queryInput");
 const limitInput = document.querySelector("#limitInput");
@@ -34,10 +42,21 @@ function parseQueries() {
 }
 
 function splitPlatforms(platforms) {
+  if (STATIC_HOST_RE.test(location.hostname)) {
+    return {
+      online: [],
+      local: platforms,
+    };
+  }
+
   return {
     online: platforms.filter((platform) => !LOCAL_PLATFORMS.has(platform)),
     local: platforms.filter((platform) => LOCAL_PLATFORMS.has(platform)),
   };
+}
+
+function platformLabel(platform) {
+  return platformLabels[platform] || platform;
 }
 
 function statText(...values) {
@@ -187,6 +206,16 @@ async function searchEndpoint(baseUrl, query, platforms, limit) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ q: query, platforms, limit, qqBrowserMode: true }),
   });
+
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) {
+    throw new Error(
+      baseUrl
+        ? "本地助手没有返回有效数据，请确认助手窗口仍在运行。"
+        : "当前 GitHub Pages 页面不能直接运行搜索接口，请先下载并启动 Windows 本地助手。",
+    );
+  }
+
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || "搜索失败");
   return data.platforms || [];
@@ -242,6 +271,10 @@ async function runSearch() {
 
   const hasLocal = platforms.some((platform) => LOCAL_PLATFORMS.has(platform));
   showNotice(hasLocal ? "QQ / 汽水需要本地助手；未启动时会提示下载，不影响在线平台查询。" : "");
+
+  if (STATIC_HOST_RE.test(location.hostname)) {
+    showNotice("当前 GitHub Pages 版本需要启动本地助手后再搜索；Windows 助手已内置 Node，解压双击即可。");
+  }
 
   currentRows = [];
   renderRows(currentRows);
