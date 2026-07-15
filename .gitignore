@@ -10,3 +10,4 @@ dist/
 .wrangler/
 .vercel/
 .openai/
+local-helper/runtime/
