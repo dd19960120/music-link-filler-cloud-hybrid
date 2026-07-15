@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>歌曲链接回填工具</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="workspace">
+        <aside class="query-panel" aria-label="歌曲搜索设置">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Music Link Finder</p>
+              <h1>歌曲链接回填工具</h1>
+            </div>
+            <span class="status-chip" id="networkStatus">待搜索</span>
+          </div>
+
+          <label class="field-label" for="songInput">输入关键词</label>
+          <textarea
+            id="songInput"
+            spellcheck="false"
+            placeholder="每行一个关键词&#10;可输入歌曲名、歌手名、专辑名、歌词片段或词曲作者&#10;例如：吹吹山顶的风"
+          ></textarea>
+
+          <fieldset class="platform-field">
+            <legend>搜索平台</legend>
+            <label><input type="checkbox" name="platform" value="netease" checked /> 网易云音乐</label>
+            <label><input type="checkbox" name="platform" value="kugou" checked /> 酷狗音乐</label>
+            <label><input type="checkbox" name="platform" value="qq" checked /> QQ音乐</label>
+            <label><input type="checkbox" name="platform" value="kuwo" checked /> 酷我音乐</label>
+            <label><input type="checkbox" name="platform" value="qishui" /> 汽水音乐App</label>
+          </fieldset>
+
+          <section class="qq-browser-panel" aria-label="QQ音乐浏览器自动化">
+            <label class="switch-row">
+              <input id="qqBrowserModeInput" type="checkbox" />
+              <span>QQ 浏览器自动化</span>
+            </label>
+            <div class="qq-browser-actions">
+              <button id="qqBrowserButton" type="button">打开/连接 QQ 浏览器</button>
+              <span id="qqBrowserStatus" class="mini-status">未连接</span>
+            </div>
+          </section>
+
+          <details class="advanced-panel">
+            <summary>QQ 音乐登录 Cookie</summary>
+            <label class="field-label" for="qqCookieInput">Cookie</label>
+            <textarea
+              id="qqCookieInput"
+              class="cookie-input"
+              spellcheck="false"
+              autocomplete="off"
+              placeholder="uin=...; qm_keyst=...; qqmusic_key=..."
+            ></textarea>
+          </details>
+
+          <details class="advanced-panel">
+            <summary>汽水音乐接口参数</summary>
+            <label class="field-label" for="qishuiCookieInput">汽水 Cookie（可选）</label>
+            <textarea
+              id="qishuiCookieInput"
+              class="cookie-input"
+              spellcheck="false"
+              autocomplete="off"
+              placeholder="默认自动读取本机汽水客户端 Cookie。需要覆盖时再填写。"
+            ></textarea>
+            <label class="field-label" for="qishuiDeviceInput">device_id（可选）</label>
+            <input id="qishuiDeviceInput" type="text" autocomplete="off" placeholder="默认自动读取本机汽水客户端 DeviceV1" />
+            <label class="field-label" for="qishuiInstallInput">iid / install_id（可选）</label>
+            <input id="qishuiInstallInput" type="text" autocomplete="off" placeholder="默认自动读取本机汽水客户端 DeviceV1" />
+          </details>
+
+          <div class="controls">
+            <label class="inline-field" for="limitInput">
+              每个平台候选数
+              <input id="limitInput" type="number" min="1" max="50" value="10" />
+            </label>
+            <button class="primary" id="searchButton" type="button">搜索并回填</button>
+          </div>
+
+          <div class="tools">
+            <button id="selectAllButton" type="button">全选平台</button>
+            <button id="sampleButton" type="button">填入示例</button>
+            <button id="clearButton" type="button">清空</button>
+          </div>
+        </aside>
+
+        <section class="result-panel" aria-label="搜索结果">
+          <div class="result-toolbar">
+            <div>
+              <p class="eyebrow">Results</p>
+              <h2>回填结果</h2>
+            </div>
+            <div class="toolbar-actions">
+              <button id="copyButton" type="button" disabled>复制表格</button>
+              <button id="downloadButton" type="button" disabled>下载 CSV</button>
+            </div>
+          </div>
+
+          <div class="summary-grid" aria-live="polite">
+            <div>
+              <span id="totalCount">0</span>
+              <small>回填行数</small>
+            </div>
+            <div>
+              <span id="exactCount">0</span>
+              <small>精确同名</small>
+            </div>
+            <div>
+              <span id="reviewCount">0</span>
+              <small>需复核</small>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>输入关键词</th>
+                  <th>平台</th>
+                  <th>序号</th>
+                  <th>歌曲名</th>
+                  <th>歌手名</th>
+                  <th>专辑名</th>
+                  <th>词作者</th>
+                  <th>曲作者</th>
+                  <th>收藏/点赞</th>
+                  <th>在听</th>
+                  <th>评论</th>
+                  <th>转发</th>
+                  <th>链接</th>
+                  <th>状态</th>
+                </tr>
+              </thead>
+              <tbody id="resultBody">
+                <tr class="empty-row">
+                  <td colspan="14">输入关键词并选择平台后，搜索结果会显示在这里。</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <template id="rowTemplate">
+      <tr>
+        <td class="input-name"></td>
+        <td class="platform-name"></td>
+        <td class="rank"></td>
+        <td class="song-name"></td>
+        <td class="artist-name"></td>
+        <td class="album-name"></td>
+        <td class="lyricist-name"></td>
+        <td class="composer-name"></td>
+        <td class="like-count"></td>
+        <td class="listen-count"></td>
+        <td class="comment-count"></td>
+        <td class="share-count"></td>
+        <td class="song-link"></td>
+        <td class="match-status"></td>
+      </tr>
+    </template>
+
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>

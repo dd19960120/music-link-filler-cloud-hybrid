@@ -1,0 +1,10 @@
+{
+  "name": "music-link-filler-cloud-hybrid",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "preview": "node preview-server.js",
+    "check": "node --check preview-server.js && node --check shared/cloud-search.js && node --check web/app.js && node --check cloud-functions/api/search.js && node --check cloud-functions/api/health.js"
+  }
+}

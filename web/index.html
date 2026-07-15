@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>歌曲链接回填工具 - 云端混合版</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <aside class="panel">
+        <div class="title-block">
+          <span class="eyebrow">Music Link Finder</span>
+          <h1>歌曲链接回填工具</h1>
+          <p>在线查公开数据；QQ 和汽水通过本地助手解锁。</p>
+        </div>
+
+        <label class="field-label" for="queryInput">输入关键词</label>
+        <textarea id="queryInput" placeholder="每行一个关键词&#10;例如：Bad Girl Good Girl miss A&#10;无人之岛 任然"></textarea>
+
+        <fieldset class="platforms">
+          <legend>平台</legend>
+          <label><input type="checkbox" name="platform" value="netease" checked /> 网易云音乐 <span>在线可用</span></label>
+          <label><input type="checkbox" name="platform" value="kugou" checked /> 酷狗音乐 <span>在线可用</span></label>
+          <label><input type="checkbox" name="platform" value="kuwo" checked /> 酷我音乐 <span>在线可用</span></label>
+          <label><input type="checkbox" name="platform" value="qq" /> QQ 音乐 <span class="needs-helper">需本地助手</span></label>
+          <label><input type="checkbox" name="platform" value="qishui" /> 汽水音乐 App <span class="needs-helper">需本地助手</span></label>
+        </fieldset>
+
+        <section class="helper-box" id="helperBox">
+          <div>
+            <strong>本地助手</strong>
+            <p id="helperStatus">未检测</p>
+          </div>
+          <div class="helper-actions">
+            <button id="checkHelperButton" type="button">连接本地助手</button>
+            <a class="download-link" href="./downloads/local-helper-windows.zip">下载 Windows 助手</a>
+          </div>
+        </section>
+
+        <div class="controls">
+          <label>
+            每个平台候选数
+            <input id="limitInput" type="number" min="1" max="30" value="10" />
+          </label>
+          <button id="searchButton" class="primary" type="button">搜索并回填</button>
+        </div>
+
+        <div class="tools">
+          <button id="sampleButton" type="button">填入示例</button>
+          <button id="clearButton" type="button">清空</button>
+        </div>
+      </aside>
+
+      <section class="results">
+        <div class="result-head">
+          <div>
+            <span class="eyebrow">Results</span>
+            <h2>回填结果</h2>
+          </div>
+          <div class="actions">
+            <button id="copyButton" type="button" disabled>复制表格</button>
+            <button id="downloadButton" type="button" disabled>下载 CSV</button>
+          </div>
+        </div>
+
+        <div class="summary">
+          <div><strong id="totalCount">0</strong><span>行结果</span></div>
+          <div><strong id="onlineCount">0</strong><span>在线返回</span></div>
+          <div><strong id="localCount">0</strong><span>本地助手</span></div>
+        </div>
+
+        <div class="notice" id="notice" hidden></div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>输入关键词</th>
+                <th>平台</th>
+                <th>序号</th>
+                <th>歌曲名</th>
+                <th>歌手名</th>
+                <th>专辑名</th>
+                <th>收藏/点赞</th>
+                <th>在听</th>
+                <th>评论</th>
+                <th>转发</th>
+                <th>链接</th>
+                <th>状态</th>
+              </tr>
+            </thead>
+            <tbody id="resultBody">
+              <tr class="empty-row">
+                <td colspan="12">输入关键词后，搜索结果会显示在这里。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <template id="rowTemplate">
+      <tr>
+        <td class="query"></td>
+        <td class="platform"></td>
+        <td class="rank"></td>
+        <td class="song"></td>
+        <td class="artists"></td>
+        <td class="album"></td>
+        <td class="favorite"></td>
+        <td class="listen"></td>
+        <td class="comment"></td>
+        <td class="share"></td>
+        <td class="link"></td>
+        <td class="status"></td>
+      </tr>
+    </template>
+
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>
