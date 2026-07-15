@@ -1367,6 +1367,31 @@ function qishuiAlbum(song) {
   return song.album?.name || song.album?.album_name || song.album_name || "";
 }
 
+function qishuiStatValue(stats, ...keys) {
+  for (const key of keys) {
+    const value = stats?.[key];
+    if (value !== undefined && value !== null && value !== "") return value;
+  }
+  return "";
+}
+
+function qishuiSongStats(song) {
+  const stats = song.stats || song.stat || song.count_info || song.counts || {};
+  return {
+    likeCount: qishuiStatValue(stats, "count_collected", "collected_count", "collect_count", "like_count"),
+    commentCount: qishuiStatValue(stats, "count_comment", "comment_count"),
+    shareCount: qishuiStatValue(stats, "count_shared", "share_count"),
+  };
+}
+
+function qishuiMergeStats(primary, fallback) {
+  return {
+    likeCount: primary.likeCount !== "" ? primary.likeCount : (fallback.likeCount ?? ""),
+    commentCount: primary.commentCount !== "" ? primary.commentCount : (fallback.commentCount ?? ""),
+    shareCount: primary.shareCount !== "" ? primary.shareCount : (fallback.shareCount ?? ""),
+  };
+}
+
 function qishuiSongFromItem(item) {
   return (
     item.entity?.track ||
@@ -1378,6 +1403,26 @@ function qishuiSongFromItem(item) {
     item.playable ||
     item
   );
+}
+
+function qishuiCandidateScore(song, keyword) {
+  const query = normalizeSongName(keyword);
+  const name = normalizeSongName(song.name || song.title || "");
+  const artists = normalizeSongName(qishuiArtists(song));
+  const album = normalizeSongName(qishuiAlbum(song));
+  let score = 0;
+
+  if (name && query === name) score += 100;
+  else if (name && query.includes(name)) score += 70;
+  else if (name && name.includes(query)) score += 40;
+
+  if (artists && query.includes(artists)) score += 45;
+  for (const artist of artists.split("/").filter(Boolean)) {
+    if (artist && query.includes(artist)) score += 30;
+  }
+
+  if (album && query.includes(album)) score += 10;
+  return score;
 }
 
 function qishuiResultItems(data) {
@@ -1522,19 +1567,30 @@ async function searchQishuiHttp(keyword, limit, options = {}) {
     const hydrated = await Promise.all(
       batch.map(async (song) => {
         const shareData = await getQishuiShareData(song, options);
+        const directStats = qishuiSongStats(song);
+        const mergedStats = qishuiMergeStats(directStats, shareData);
         return {
           ...song,
           qishuiLink: shareData.link,
-          qishuiLikeCount: shareData.likeCount,
-          qishuiCommentCount: shareData.commentCount,
-          qishuiShareCount: shareData.shareCount,
+          qishuiLikeCount: mergedStats.likeCount,
+          qishuiCommentCount: mergedStats.commentCount,
+          qishuiShareCount: mergedStats.shareCount,
+          qishuiScore: qishuiCandidateScore(song, keyword),
         };
       }),
     );
     withLinks.push(...hydrated);
   }
 
-  return withLinks.map((song, index) =>
+  const sortedRows = withLinks
+    .map((song, index) => ({ ...song, qishuiOriginalIndex: index }))
+    .sort(
+      (left, right) =>
+        (right.qishuiScore || 0) - (left.qishuiScore || 0) ||
+        left.qishuiOriginalIndex - right.qishuiOriginalIndex,
+    );
+
+  return sortedRows.map((song, index) =>
     mapResult(
       {
         platform: "qishui",
