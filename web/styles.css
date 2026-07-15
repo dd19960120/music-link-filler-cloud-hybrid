@@ -188,6 +188,12 @@ input:focus {
   gap: 10px;
 }
 
+.helper-hint {
+  color: #607086;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .controls {
   display: grid;
   grid-template-columns: 95px 1fr;
