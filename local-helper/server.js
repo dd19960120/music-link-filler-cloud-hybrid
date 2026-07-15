@@ -1443,7 +1443,7 @@ function qishuiResultItems(data) {
   return items;
 }
 
-function parseQishuiShareStats(html) {
+function parseQishuiStatsFromText(text) {
   const picked = {};
   const patterns = {
     likeCount: /"count_collected"\s*:\s*(\d+)/,
@@ -1452,18 +1452,57 @@ function parseQishuiShareStats(html) {
   };
 
   for (const [key, pattern] of Object.entries(patterns)) {
-    const match = String(html || "").match(pattern);
+    const match = String(text || "").match(pattern);
     if (match) picked[key] = Number(match[1]);
   }
 
   return picked;
 }
 
-async function getQishuiSharePageStats(url) {
+function parseQishuiStatsObject(statsText) {
+  const stats = parseQishuiStatsFromText(`{${statsText || ""}}`);
+  return {
+    likeCount: stats.likeCount ?? 0,
+    commentCount: stats.commentCount ?? 0,
+    shareCount: stats.shareCount ?? 0,
+  };
+}
+
+function parseQishuiScopedStats(text, itemId) {
+  const id = String(itemId || "");
+  if (!id) return null;
+
+  const markers = [`"trackInfo":{"id":"${id}"`, `"track":{"id":"${id}"`];
+  for (const marker of markers) {
+    const markerIndex = text.indexOf(marker);
+    if (markerIndex < 0) continue;
+
+    const scopedText = text.slice(markerIndex, markerIndex + 90000);
+    const statsMatch = scopedText.match(/"stats"\s*:\s*\{([^}]*)\}/);
+    if (statsMatch) return parseQishuiStatsObject(statsMatch[1]);
+    return {
+      likeCount: 0,
+      commentCount: 0,
+      shareCount: 0,
+    };
+  }
+
+  return null;
+}
+
+function parseQishuiShareStats(html, itemId) {
+  const text = String(html || "");
+  const scopedStats = parseQishuiScopedStats(text, itemId);
+  if (scopedStats) return scopedStats;
+
+  return parseQishuiStatsFromText(text);
+}
+
+async function getQishuiSharePageStats(url, itemId) {
   if (!url) return {};
   try {
     const html = await fetchText(url, { timeoutMs: 15000 });
-    return parseQishuiShareStats(html);
+    return parseQishuiShareStats(html, itemId);
   } catch {
     return {};
   }
@@ -1493,7 +1532,7 @@ async function getQishuiShareData(song, options) {
       data.share_info?.link ||
       "";
     const statsLink = data.share_info?.share_link || descLink || displayLink;
-    const stats = await getQishuiSharePageStats(statsLink);
+    const stats = await getQishuiSharePageStats(statsLink, itemId);
 
     return {
       link: displayLink,
