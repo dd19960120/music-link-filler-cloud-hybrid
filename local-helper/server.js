@@ -750,14 +750,24 @@ function chromeCandidates() {
   const localAppData = process.env.LOCALAPPDATA || "";
   const programFiles = process.env.PROGRAMFILES || "C:\\Program Files";
   const programFilesX86 = process.env["PROGRAMFILES(X86)"] || "C:\\Program Files (x86)";
+  const home = process.env.HOME || "";
 
-  return [
+  const windowsCandidates = [
     join(programFiles, "Google\\Chrome\\Application\\chrome.exe"),
     join(programFilesX86, "Google\\Chrome\\Application\\chrome.exe"),
     join(localAppData, "Google\\Chrome\\Application\\chrome.exe"),
     join(programFiles, "Microsoft\\Edge\\Application\\msedge.exe"),
     join(programFilesX86, "Microsoft\\Edge\\Application\\msedge.exe"),
   ];
+
+  const macCandidates = [
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    join(home, "Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+    join(home, "Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"),
+  ];
+
+  return process.platform === "darwin" ? macCandidates : windowsCandidates;
 }
 
 function findChrome() {
@@ -806,7 +816,7 @@ async function startQqBrowser() {
     {
       detached: true,
       stdio: "ignore",
-      windowsHide: false,
+      windowsHide: process.platform === "win32" ? false : undefined,
     },
   );
   qqChromeProcess.unref();
