@@ -1,28 +1,35 @@
 @echo off
-chcp 65001 >nul
+setlocal
 cd /d "%~dp0"
 
 set "PORT=5178"
 set "NO_OPEN=1"
 set "BUNDLED_NODE=%~dp0runtime\node.exe"
+set "LOG_FILE=%~dp0local-helper.log"
+
+echo ================================================
+echo Music Link Filler - Local Helper
+echo ================================================
+echo.
+echo Folder: %CD%
+echo Log: %LOG_FILE%
+echo.
 
 if not exist "%~dp0server.js" (
-  echo [错误] 没有找到 server.js。
+  echo [ERROR] server.js was not found.
   echo.
-  echo 请不要在压缩包里面直接双击运行。
-  echo 正确步骤：
-  echo 1. 右键 local-helper-windows.zip
-  echo 2. 选择“全部解压缩”
-  echo 3. 进入解压后的文件夹
-  echo 4. 再双击 start-local-helper-windows
+  echo Do not run this file inside the ZIP preview.
+  echo Please right-click local-helper-windows.zip, choose "Extract All",
+  echo open the extracted folder, then double-click start-local-helper-windows.
   echo.
   pause
   exit /b 1
 )
 
 if not exist "%~dp0public" (
-  echo [错误] 文件不完整，没有找到 public 文件夹。
-  echo 请重新下载 Windows 助手，并先“全部解压缩”后再运行。
+  echo [ERROR] The public folder was not found.
+  echo Please download the helper again, extract the ZIP fully, then run this file.
+  echo.
   pause
   exit /b 1
 )
@@ -34,15 +41,28 @@ if exist "%BUNDLED_NODE%" (
   if errorlevel 1 (
     echo [ERROR] Node.js was not found.
     echo Please download the full Windows helper package, or install Node.js 22+.
+    echo.
     pause
     exit /b 1
   )
   set "NODE_EXE=node"
 )
 
-echo Starting Music Link Filler local helper...
+echo Starting local helper...
 echo Local helper address: http://127.0.0.1:%PORT%
 echo Keep this window open, then return to the online page and connect the local helper.
 echo.
-"%NODE_EXE%" server.js
+echo If startup fails, send the file local-helper.log to the tool maker.
+echo.
+
+"%NODE_EXE%" server.js > "%LOG_FILE%" 2>&1
+set "EXIT_CODE=%ERRORLEVEL%"
+
+echo.
+echo Local helper stopped. Exit code: %EXIT_CODE%
+echo Last log lines:
+echo ------------------------------------------------
+powershell -NoProfile -ExecutionPolicy Bypass -Command "if (Test-Path '%LOG_FILE%') { Get-Content -LiteralPath '%LOG_FILE%' -Tail 30 }"
+echo ------------------------------------------------
 pause
+exit /b %EXIT_CODE%
