@@ -107,6 +107,33 @@ h2 {
   line-height: 1.6;
 }
 
+.usage-policy {
+  border: 1px solid #f0c7c9;
+  border-radius: 8px;
+  background: #fff7f7;
+  color: #6b2025;
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  line-height: 1.55;
+  margin: -4px 0 18px;
+  padding: 12px 14px;
+}
+
+.usage-policy span {
+  color: #8a3439;
+  font-weight: 700;
+}
+
+.usage-policy strong {
+  color: #c9272f;
+  font-size: 14px;
+}
+
+.usage-policy p {
+  margin: 0;
+}
+
 .field-label,
 .controls label {
   display: grid;
