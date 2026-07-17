@@ -823,9 +823,9 @@ const offlinePagePatterns = {
     /您查看的歌曲已下架|歌曲已下架|该歌曲不存在|很抱歉.*?已下架|无法播放/i,
     /mod_data_stat|mod_empty|icon_txt|feedback.*?平台/i,
   ],
-  kugou: [/此音乐暂时不能播放|获取数据失败|歌曲不存在|资源不存在|暂无版权|已下架|无法播放/i],
+  kugou: [/此音乐暂时不能播放|此音乐暂时不能播放|获取数据失败|歌曲不存在|资源不存在|暂无版权|已下架|无法播放|暂时不能播放/i],
   kuwo: [/歌曲不存在|暂无版权|版权原因|已下架|无法播放|暂时不能播放|资源不存在|播放失败/i],
-  qishui: [/目前暂不支持播放该歌曲|暂不支持播放该歌曲|歌曲不存在|已下架|无法播放|资源不存在/i],
+  qishui: [/很抱歉.*?暂不支持播放该歌曲|目前暂不支持播放该歌曲|暂不支持播放该歌曲|歌曲不存在|已下架|无法播放|资源不存在/i],
   other: [/歌曲已下架|已下架|暂时不能播放|暂不支持播放|资源不存在|无法播放|暂无版权|页面不存在|404/i],
 };
 
@@ -834,7 +834,7 @@ const playablePagePatterns = {
   qq: [/class=["'][^"']*(?:mod_song_info|song_detail__info|data__name|songlist__songname)[^"']*["']/i],
   kugou: [/class=["'][^"']*(?:audio|player|playBtn|btn_play)[^"']*["']/i, /下载这首歌|酷狗音乐/i],
   kuwo: [/class=["'][^"']*(?:player|play|song)[^"']*["']/i, /立即播放|酷我音乐/i],
-  qishui: [/进入汽水音乐|class=["'][^"']*(?:player|music-player|play)[^"']*["']/i],
+  qishui: [],
   other: [],
 };
 
@@ -927,10 +927,45 @@ async function checkKuwoOfflineApi(songId) {
   }
 }
 
-async function checkOfflineByPlatformApi(detected) {
+function extractKugouAlbumId(url) {
+  const decoded = decodeURIComponent(String(url || ""));
+  const matched = decoded.match(/(?:album_id|albumid|albumId)=([0-9]+)/i);
+  return matched?.[1] || "";
+}
+
+async function checkKugouOfflineApi(hash, sourceUrl) {
+  try {
+    const url = new URL("https://wwwapi.kugou.com/yy/index.php");
+    const albumId = extractKugouAlbumId(sourceUrl);
+    url.search = new URLSearchParams({
+      r: "play/getdata",
+      hash,
+      ...(albumId ? { album_id: albumId } : {}),
+    });
+    const data = await fetchJson(url.toString(), {
+      timeoutMs: 9000,
+      headers: { Referer: "https://www.kugou.com/" },
+    });
+    if (Number(data.status) === 1 && data.data && (data.data.play_url || data.data.audio_name || data.data.song_name)) {
+      return { status: "可播放", evidence: "酷狗播放接口返回了歌曲播放数据" };
+    }
+    if (Number(data.status) === 0 || data.err_code) {
+      return {
+        status: "已下架",
+        evidence: `酷狗播放接口返回不可播放${data.err_code ? ` err_code=${data.err_code}` : ""}`,
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function checkOfflineByPlatformApi(detected, sourceUrl) {
   if (!detected.id) return null;
   if (detected.key === "netease") return checkNeteaseOfflineApi(detected.id);
   if (detected.key === "kuwo") return checkKuwoOfflineApi(detected.id);
+  if (detected.key === "kugou") return checkKugouOfflineApi(detected.id, sourceUrl);
   return null;
 }
 
@@ -1009,6 +1044,11 @@ async function dumpOfflineDom(url, platformKey) {
 
     const client = await connectCdp(pageTarget.webSocketDebuggerUrl);
     try {
+      const dialogMessages = [];
+      client.on?.("Page.javascriptDialogOpening", (params) => {
+        if (params.message) dialogMessages.push(params.message);
+        client.send("Page.handleJavaScriptDialog", { accept: true }).catch(() => {});
+      });
       await client.send("Page.enable");
       await client.send("Runtime.enable");
       const loadEvent = client.waitFor("Page.loadEventFired", 12000).catch(() => null);
@@ -1016,10 +1056,15 @@ async function dumpOfflineDom(url, platformKey) {
       await Promise.race([loadEvent, sleep(12000)]);
       await sleep(platformKey === "qishui" ? 3500 : 2500);
       const result = await client.send("Runtime.evaluate", {
-        expression: "document.documentElement ? document.documentElement.outerHTML : ''",
+        expression: `(() => ({
+          html: document.documentElement ? document.documentElement.outerHTML : '',
+          text: document.body ? document.body.innerText : '',
+          title: document.title || ''
+        }))()`,
         returnByValue: true,
       });
-      return typeof result.result?.value === "string" ? result.result.value : "";
+      const value = result.result?.value || {};
+      return [value.title, value.html, value.text, ...dialogMessages].filter(Boolean).join("\n");
     } finally {
       client.close();
     }
@@ -1089,7 +1134,7 @@ async function checkOfflineOne(url) {
   const started = Date.now();
   const detected = detectOfflinePlatform(url);
   try {
-    const apiVerdict = await checkOfflineByPlatformApi(detected);
+    const apiVerdict = await checkOfflineByPlatformApi(detected, url);
     if (apiVerdict) {
       return {
         url,
@@ -1223,6 +1268,7 @@ function connectCdp(wsUrl) {
     let id = 0;
     const pending = new Map();
     const waiters = new Map();
+    const listeners = new Map();
 
     ws.addEventListener("open", () => {
       resolve({
@@ -1243,6 +1289,11 @@ function connectCdp(wsUrl) {
             waiters.set(method, { resolve: innerResolve, timer });
           });
         },
+        on(method, callback) {
+          const callbacks = listeners.get(method) || [];
+          callbacks.push(callback);
+          listeners.set(method, callbacks);
+        },
         close() {
           ws.close();
         },
@@ -1251,6 +1302,13 @@ function connectCdp(wsUrl) {
 
     ws.addEventListener("message", (event) => {
       const message = JSON.parse(event.data);
+      if (message.method && listeners.has(message.method)) {
+        for (const callback of listeners.get(message.method)) {
+          try {
+            callback(message.params || {});
+          } catch {}
+        }
+      }
       if (!message.id || !pending.has(message.id)) return;
 
       const callbacks = pending.get(message.id);
@@ -2183,11 +2241,11 @@ async function handleLocalStatus(_req, res) {
   sendJson(res, 200, {
     ok: true,
     name: "歌曲链接回填本地助手",
-    version: "cloud-hybrid-3",
+    version: "cloud-hybrid-4",
     features: {
       search: true,
       offlineCheck: true,
-      offlineCheckVersion: 2,
+      offlineCheckVersion: 3,
     },
     platforms: {
       qq: {
