@@ -45,24 +45,26 @@ Object.assign(platformConfig, {
 
 let qqChromeProcess = null;
 
-function sendJson(res, statusCode, payload) {
-  res.writeHead(statusCode, {
+function corsHeaders(extra = {}) {
+  return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
-    "Content-Type": "application/json; charset=utf-8",
+    "Access-Control-Allow-Private-Network": "true",
     "Cache-Control": "no-store",
-  });
+    ...extra,
+  };
+}
+
+function sendJson(res, statusCode, payload) {
+  res.writeHead(statusCode, corsHeaders({
+    "Content-Type": "application/json; charset=utf-8",
+  }));
   res.end(JSON.stringify(payload));
 }
 
 function sendCorsOptions(res) {
-  res.writeHead(204, {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
-    "Cache-Control": "no-store",
-  });
+  res.writeHead(204, corsHeaders());
   res.end();
 }
 
@@ -2154,7 +2156,11 @@ async function handleLocalStatus(_req, res) {
   sendJson(res, 200, {
     ok: true,
     name: "歌曲链接回填本地助手",
-    version: "cloud-hybrid-1",
+    version: "cloud-hybrid-2",
+    features: {
+      search: true,
+      offlineCheck: true,
+    },
     platforms: {
       qq: {
         available: true,

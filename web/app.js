@@ -45,6 +45,7 @@ const offlineUnknownCount = document.querySelector("#offlineUnknownCount");
 let currentRows = [];
 let currentOfflineRows = [];
 let helperConnected = false;
+let helperSupportsOffline = false;
 
 function selectedPlatforms() {
   return platformInputs.filter((item) => item.checked).map((item) => item.value);
@@ -323,8 +324,13 @@ async function runOfflineCheck() {
     return;
   }
 
-  if (!helperConnected && !(await checkHelper())) {
-    showOfflineNotice("请先下载并启动本地助手，然后再检测链接是否下架。");
+  if (!(await checkHelper())) {
+    showOfflineNotice("没有连上本地助手。请先下载并启动新版本地助手，再检测链接是否下架。");
+    return;
+  }
+
+  if (!helperSupportsOffline) {
+    showOfflineNotice("当前运行的是旧版本地助手，不支持下架检测。请关闭旧助手窗口，重新下载并启动最新助手。");
     return;
   }
 
@@ -339,6 +345,10 @@ async function runOfflineCheck() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ links }),
     });
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.includes("application/json")) {
+      throw new Error("本地助手没有返回有效数据。请确认已经关闭旧助手，并启动最新版本地助手。");
+    }
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "检测失败");
 
@@ -346,7 +356,12 @@ async function runOfflineCheck() {
     renderOfflineRows(currentOfflineRows);
     showOfflineNotice(`检测完成：共 ${currentOfflineRows.length} 条。`);
   } catch (error) {
-    showOfflineNotice(error instanceof Error ? error.message : String(error));
+    const message = error instanceof Error ? error.message : String(error);
+    showOfflineNotice(
+      message === "Failed to fetch"
+        ? "连接本地助手失败。请确认新版本地助手窗口正在运行；如果刚更新过，请关闭旧助手后重新下载并启动。"
+        : message,
+    );
   } finally {
     setOfflineBusy(false);
   }
@@ -359,11 +374,13 @@ async function checkHelper() {
     const response = await fetch(`${LOCAL_HELPER}/api/status`, { signal: controller.signal });
     const data = await response.json();
     helperConnected = response.ok && data.ok;
+    helperSupportsOffline = Boolean(data.features?.offlineCheck);
     helperStatus.textContent = helperConnected
-      ? `已连接：${data.name || "本地助手"}`
+      ? `已连接：${data.name || "本地助手"}${helperSupportsOffline ? "" : "（旧版，请更新）"}`
       : "未连接";
   } catch {
     helperConnected = false;
+    helperSupportsOffline = false;
     helperStatus.textContent = "未连接，请下载并启动本地助手";
   } finally {
     clearTimeout(timeout);
