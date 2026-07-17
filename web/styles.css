@@ -134,6 +134,28 @@ h2 {
   margin: 0;
 }
 
+.mode-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 0 0 18px;
+}
+
+.mode-switch button {
+  font-weight: 800;
+}
+
+.mode-switch button.active {
+  border-color: #c9272f;
+  background: #c9272f;
+  color: #ffffff;
+}
+
+body[data-mode="offline"] .link-mode-only,
+body:not([data-mode="offline"]) .offline-mode-only {
+  display: none !important;
+}
+
 .field-label,
 .controls label {
   display: grid;
@@ -263,6 +285,18 @@ input:focus {
   margin-top: 12px;
 }
 
+.offline-box {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.offline-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 10px;
+}
+
 .results {
   padding: 22px;
   overflow: hidden;
@@ -286,6 +320,10 @@ input:focus {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   margin: 20px 0;
+}
+
+.offline-summary {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .summary div {
@@ -327,6 +365,10 @@ table {
   min-width: 1180px;
   border-collapse: collapse;
   font-size: 14px;
+}
+
+.offline-table {
+  min-width: 980px;
 }
 
 th,
@@ -379,6 +421,21 @@ td a {
   color: #8a5700;
 }
 
+.badge.down {
+  background: #fff0f0;
+  color: #c9272f;
+}
+
+.badge.playable {
+  background: #e9f9f1;
+  color: #047857;
+}
+
+.badge.unknown {
+  background: #fff8e9;
+  color: #8a5700;
+}
+
 @media (max-width: 920px) {
   .shell {
     grid-template-columns: 1fr;
@@ -387,7 +444,8 @@ td a {
   }
 
   .controls,
-  .summary {
+  .summary,
+  .offline-controls {
     grid-template-columns: 1fr;
   }
 }

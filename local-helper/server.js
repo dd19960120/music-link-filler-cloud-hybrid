@@ -1,7 +1,9 @@
 import { createServer, request as httpRequest } from "node:http";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
+import { createServer as createNetServer } from "node:net";
+import { tmpdir } from "node:os";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCipheriv, createHash, randomUUID } from "node:crypto";
@@ -16,6 +18,8 @@ const shouldOpenBrowser = process.env.NO_OPEN !== "1" && !process.argv.includes(
 const qishuiDeviceId = process.env.QISHUI_DEVICE_ID || "7390000000000000000";
 const qishuiInstallId = process.env.QISHUI_INSTALL_ID || "7390000000000000000";
 const MAX_RESULTS_PER_PLATFORM = 200;
+const MAX_OFFLINE_CHECK_LINKS = 300;
+const OFFLINE_CHECK_CONCURRENCY = 2;
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -772,6 +776,360 @@ function chromeCandidates() {
 
 function findChrome() {
   return chromeCandidates().find((candidate) => candidate && existsSync(candidate));
+}
+
+const offlinePlatformRules = [
+  {
+    name: "网易云音乐",
+    key: "netease",
+    domains: ["music.163.com", "163cn.tv"],
+    idPatterns: [/song\?id=(\d+)/i, /id=(\d+)/i, /song\/(\d+)/i],
+  },
+  {
+    name: "QQ音乐",
+    key: "qq",
+    domains: ["y.qq.com", "i.y.qq.com", "c.y.qq.com", "c6.y.qq.com"],
+    idPatterns: [/songDetail\/([A-Za-z0-9]+)/i, /songid=(\d+)/i, /songmid=([A-Za-z0-9]+)/i],
+  },
+  {
+    name: "酷狗音乐",
+    key: "kugou",
+    domains: ["kugou.com", "kg.qq.com"],
+    idPatterns: [/hash=([A-Za-z0-9]+)/i, /song\/([A-Za-z0-9]+)/i, /mixsongid=(\d+)/i],
+  },
+  {
+    name: "酷我音乐",
+    key: "kuwo",
+    domains: ["kuwo.cn"],
+    idPatterns: [/play_detail\/(\d+)/i, /rid=(\d+)/i, /MUSIC_(\d+)/i],
+  },
+  {
+    name: "汽水音乐",
+    key: "qishui",
+    domains: ["qishui.douyin.com", "music.douyin.com", "douyin.com"],
+    idPatterns: [/track_id=([A-Za-z0-9_-]+)/i, /music\/([A-Za-z0-9_-]+)/i, /s\/([A-Za-z0-9_-]+)/i],
+  },
+];
+
+const offlinePagePatterns = {
+  netease: [
+    /暂无版权|因合作方要求.*?暂时无法播放|该歌曲暂时无法播放|歌曲已下架|资源不存在|播放按钮.*?disabled/i,
+    /u-btni-play-dis|ply-dis|btn-dis/i,
+  ],
+  qq: [
+    /您查看的歌曲已下架|歌曲已下架|该歌曲不存在|很抱歉.*?无法播放|无法播放|暂无版权/i,
+    /mod_empty|feedback.*?平台/i,
+  ],
+  kugou: [/此音乐暂时不能播放|获取数据失败|歌曲不存在|资源不存在|暂无版权|已下架|无法播放/i],
+  kuwo: [/歌曲不存在|暂无版权|版权原因|已下架|无法播放|暂时不能播放|资源不存在|播放失败/i],
+  qishui: [/目前暂不支持播放该歌曲|暂不支持播放该歌曲|歌曲不存在|已下架|无法播放|资源不存在/i],
+  other: [/歌曲已下架|已下架|暂时不能播放|暂不支持播放|资源不存在|无法播放|暂无版权|页面不存在|404/i],
+};
+
+const playablePagePatterns = {
+  netease: [/data-res-action=["']play["']/i, /class=["'][^"']*(?:u-btni-play|btn-play|ply)[^"']*["']/i],
+  qq: [/class=["'][^"']*(?:mod_song_info|song_detail__info|data__name|songlist__songname)[^"']*["']/i],
+  kugou: [/class=["'][^"']*(?:audio|player|playBtn|btn_play)[^"']*["']/i, /下载这首歌|酷狗音乐/i],
+  kuwo: [/class=["'][^"']*(?:player|play|song)[^"']*["']/i, /立即播放|酷我音乐/i],
+  qishui: [/进入汽水音乐|class=["'][^"']*(?:player|music-player|play)[^"']*["']/i],
+  other: [/播放|评论|收藏|歌手|专辑/i],
+};
+
+function normalizeOfflineLinks(input) {
+  const seen = new Set();
+  const links = [];
+  const values = Array.isArray(input) ? input : String(input || "").split(/\r?\n/);
+
+  for (const item of values) {
+    const text = String(item || "").trim();
+    const match = text.match(/https?:\/\/[^\s"'<>，。；、]+/i);
+    if (!match) continue;
+    const value = match[0];
+    if (seen.has(value)) continue;
+    seen.add(value);
+    links.push(value);
+  }
+
+  return links;
+}
+
+function detectOfflinePlatform(url) {
+  let host = "";
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return { name: "链接格式异常", key: "other", id: "" };
+  }
+
+  const rule = offlinePlatformRules.find((item) =>
+    item.domains.some((domain) => host === domain || host.endsWith(`.${domain}`)),
+  );
+  if (!rule) return { name: "其他平台", key: "other", id: "" };
+
+  const decoded = decodeURIComponent(url);
+  let id = "";
+  for (const pattern of rule.idPatterns) {
+    const matched = decoded.match(pattern);
+    if (matched?.[1]) {
+      id = matched[1];
+      break;
+    }
+  }
+
+  return { name: rule.name, key: rule.key, id };
+}
+
+async function checkNeteaseOfflineApi(songId) {
+  try {
+    const data = await fetchJson(
+      `https://music.163.com/api/song/enhance/player/url?id=${encodeURIComponent(songId)}&ids=%5B${encodeURIComponent(songId)}%5D&br=128000`,
+      {
+        timeoutMs: 9000,
+        headers: { Referer: "https://music.163.com/" },
+      },
+    );
+    const item = Array.isArray(data.data) ? data.data[0] : null;
+    if (!item) return { status: "已下架", evidence: "网易云接口未返回播放数据" };
+    if (item.url) return { status: "可播放", evidence: "网易云播放接口返回了可用播放地址" };
+    if (item.code && Number(item.code) !== 200) {
+      return { status: "已下架", evidence: `网易云播放接口返回不可播 code=${item.code}` };
+    }
+    if (item.freeTrialInfo) return { status: "可播放", evidence: "网易云接口返回试听信息，歌曲未下架但可能受版权限制" };
+    return { status: "已下架", evidence: "网易云播放接口返回空播放地址" };
+  } catch {
+    return null;
+  }
+}
+
+async function checkKuwoOfflineApi(songId) {
+  try {
+    const url = new URL("https://www.kuwo.cn/api/v1/www/music/playUrl");
+    url.search = new URLSearchParams({
+      mid: songId,
+      type: "music",
+      httpsStatus: "1",
+      reqId: randomUUID(),
+    });
+    const data = await fetchJson(url.toString(), {
+      timeoutMs: 9000,
+      headers: { Referer: `https://www.kuwo.cn/play_detail/${songId}` },
+    });
+    if (data.data?.url || data.url) return { status: "可播放", evidence: "酷我播放接口返回了可用播放地址" };
+    if (String(data.code || "") && String(data.code) !== "200") {
+      return { status: "已下架", evidence: `酷我播放接口返回异常 code=${data.code}` };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function checkOfflineByPlatformApi(detected) {
+  if (!detected.id) return null;
+  if (detected.key === "netease") return checkNeteaseOfflineApi(detected.id);
+  if (detected.key === "kuwo") return checkKuwoOfflineApi(detected.id);
+  return null;
+}
+
+function getFreePort() {
+  return new Promise((resolve, reject) => {
+    const probe = createNetServer();
+    probe.listen(0, "127.0.0.1", () => {
+      const address = probe.address();
+      const selectedPort = typeof address === "object" && address ? address.port : 0;
+      probe.close(() => resolve(selectedPort));
+    });
+    probe.on("error", reject);
+  });
+}
+
+async function waitForChromeDebugPort(debugPort) {
+  const deadline = Date.now() + 8000;
+  while (Date.now() < deadline) {
+    try {
+      await fetchLocalJson(`http://127.0.0.1:${debugPort}/json/version`, { timeoutMs: 1200 });
+      return;
+    } catch {
+      await sleep(150);
+    }
+  }
+  throw new Error("无头 Chrome 启动超时");
+}
+
+function normalizeOfflineUrlForChrome(url, platformKey) {
+  if (platformKey === "netease" && url.includes("music.163.com/#/")) {
+    return url.replace("music.163.com/#/", "music.163.com/");
+  }
+  return url;
+}
+
+async function dumpOfflineDom(url, platformKey) {
+  const chromePath = findChrome();
+  if (!chromePath) {
+    throw new Error("未找到 Chrome 或 Edge，请先安装 Chrome 或 Edge 后重试。");
+  }
+
+  const debugPort = await getFreePort();
+  const tempProfile = await mkdtemp(join(tmpdir(), "music-offline-chrome-"));
+  const args = [
+    "--headless=new",
+    "--disable-gpu",
+    "--disable-dev-shm-usage",
+    "--disable-background-networking",
+    "--disable-component-update",
+    "--disable-sync",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--mute-audio",
+    "--window-size=1365,900",
+    `--user-data-dir=${tempProfile}`,
+    `--remote-debugging-port=${debugPort}`,
+    "--lang=zh-CN",
+    "about:blank",
+  ];
+
+  const browser = spawn(chromePath, args, {
+    stdio: ["ignore", "ignore", "pipe"],
+    windowsHide: true,
+  });
+  let stderr = "";
+  browser.stderr.on("data", (chunk) => {
+    stderr += chunk.toString("utf8");
+  });
+
+  try {
+    await waitForChromeDebugPort(debugPort);
+    const targets = await fetchLocalJson(`http://127.0.0.1:${debugPort}/json/list`, { timeoutMs: 2500 });
+    const pageTarget = targets.find((target) => target.type === "page") || targets[0];
+    if (!pageTarget?.webSocketDebuggerUrl) throw new Error("无法连接无头 Chrome 页面");
+
+    const client = await connectCdp(pageTarget.webSocketDebuggerUrl);
+    try {
+      await client.send("Page.enable");
+      await client.send("Runtime.enable");
+      await client.send("Page.navigate", { url: normalizeOfflineUrlForChrome(url, platformKey) });
+      await sleep(platformKey === "qishui" ? 6500 : 4500);
+      const result = await client.send("Runtime.evaluate", {
+        expression: "document.documentElement ? document.documentElement.outerHTML : ''",
+        returnByValue: true,
+      });
+      return typeof result.result?.value === "string" ? result.result.value : "";
+    } finally {
+      client.close();
+    }
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : cleanBrowserError(stderr) || "页面检测失败");
+  } finally {
+    browser.kill();
+    rm(tempProfile, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+function htmlToPlainText(html) {
+  return String(html || "")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function clipEvidence(value) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  return text.length > 90 ? `${text.slice(0, 90)}...` : text;
+}
+
+function judgeOfflineStatus(platformKey, html, text) {
+  const source = `${html}\n${text}`.slice(0, 4_000_000);
+  const offline = [...(offlinePagePatterns[platformKey] || []), ...offlinePagePatterns.other];
+  for (const pattern of offline) {
+    const matched = source.match(pattern);
+    if (matched) return { status: "已下架", evidence: `命中下架特征：${clipEvidence(matched[0])}` };
+  }
+
+  const playable = [...(playablePagePatterns[platformKey] || []), ...playablePagePatterns.other];
+  for (const pattern of playable) {
+    const matched = source.match(pattern);
+    if (matched) return { status: "可播放", evidence: `未命中下架提示，命中可播放页面特征：${clipEvidence(matched[0])}` };
+  }
+
+  if (/访问过于频繁|验证码|安全验证|登录|not found|404/i.test(text)) {
+    return { status: "不确定", evidence: `页面可能被拦截或需要登录：${clipEvidence(text)}` };
+  }
+
+  return { status: "不确定", evidence: "未命中明确下架提示，也未发现足够的可播放特征" };
+}
+
+function cleanBrowserError(stderr) {
+  return String(stderr || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.includes("DevTools listening"))
+    .slice(-2)
+    .join(" ");
+}
+
+async function checkOfflineOne(url) {
+  const started = Date.now();
+  const detected = detectOfflinePlatform(url);
+  try {
+    const apiVerdict = await checkOfflineByPlatformApi(detected);
+    if (apiVerdict) {
+      return {
+        url,
+        platform: detected.name,
+        platformKey: detected.key,
+        songId: detected.id,
+        status: apiVerdict.status,
+        evidence: apiVerdict.evidence,
+        elapsedMs: Date.now() - started,
+      };
+    }
+
+    const html = await dumpOfflineDom(url, detected.key);
+    const text = htmlToPlainText(html);
+    const verdict = judgeOfflineStatus(detected.key, html, text);
+    return {
+      url,
+      platform: detected.name,
+      platformKey: detected.key,
+      songId: detected.id,
+      status: verdict.status,
+      evidence: verdict.evidence,
+      elapsedMs: Date.now() - started,
+    };
+  } catch (error) {
+    return {
+      url,
+      platform: detected.name,
+      platformKey: detected.key,
+      songId: detected.id,
+      status: "检测失败",
+      evidence: error instanceof Error ? error.message : String(error),
+      elapsedMs: Date.now() - started,
+    };
+  }
+}
+
+async function checkOfflineMany(links) {
+  const results = new Array(links.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(OFFLINE_CHECK_CONCURRENCY, links.length) }, async () => {
+    while (next < links.length) {
+      const index = next;
+      next += 1;
+      results[index] = await checkOfflineOne(links[index]);
+    }
+  });
+  await Promise.all(workers);
+  return results;
 }
 
 async function qqBrowserStatus() {
@@ -1742,6 +2100,28 @@ async function handleApiSearch(req, res, url) {
   });
 }
 
+async function handleOfflineCheck(req, res) {
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: "Method not allowed" });
+    return;
+  }
+
+  const body = await readJsonBody(req);
+  const links = normalizeOfflineLinks(body.links || body.text || []).slice(0, MAX_OFFLINE_CHECK_LINKS);
+
+  if (links.length === 0) {
+    sendJson(res, 400, { error: "请至少输入一个歌曲链接" });
+    return;
+  }
+
+  const results = await checkOfflineMany(links);
+  sendJson(res, 200, {
+    requestId: randomUUID(),
+    count: results.length,
+    results,
+  });
+}
+
 async function handleQqBrowserStart(_req, res) {
   try {
     sendJson(res, 200, await startQqBrowser());
@@ -1838,6 +2218,11 @@ const server = createServer(async (req, res) => {
 
   if (url.pathname === "/api/search") {
     await handleApiSearch(req, res, url);
+    return;
+  }
+
+  if (url.pathname === "/api/offline-check" || url.pathname === "/api/check") {
+    await handleOfflineCheck(req, res);
     return;
   }
 

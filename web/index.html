@@ -21,10 +21,15 @@
           <p>请勿对外传播、转发、售卖或公开分享本工具、下载包及访问链接。</p>
         </section>
 
-        <label class="field-label" for="queryInput">输入关键词</label>
-        <textarea id="queryInput" placeholder="每行一个关键词&#10;例如：Bad Girl Good Girl miss A&#10;无人之岛 任然"></textarea>
+        <div class="mode-switch" role="tablist" aria-label="Tool mode">
+          <button id="linkModeButton" class="active" type="button">获取连接</button>
+          <button id="offlineModeButton" type="button">检测链接是否下架</button>
+        </div>
 
-        <fieldset class="platforms">
+        <label class="field-label link-mode-only" for="queryInput">输入关键词</label>
+        <textarea class="link-mode-only" id="queryInput" placeholder="每行一个关键词&#10;例如：Bad Girl Good Girl miss A&#10;无人之岛 任然"></textarea>
+
+        <fieldset class="platforms link-mode-only">
           <legend>平台</legend>
           <label><input type="checkbox" name="platform" value="netease" checked /> 网易云音乐 <span>公开平台</span></label>
           <label><input type="checkbox" name="platform" value="kugou" checked /> 酷狗音乐 <span>公开平台</span></label>
@@ -60,7 +65,7 @@
           </ul>
         </section>
 
-        <div class="controls">
+        <div class="controls link-mode-only">
           <label>
             每个平台候选数
             <input id="limitInput" type="number" min="1" max="200" value="10" />
@@ -68,13 +73,24 @@
           <button id="searchButton" class="primary" type="button">搜索并回填</button>
         </div>
 
-        <div class="tools">
+        <div class="tools link-mode-only">
           <button id="sampleButton" type="button">填入示例</button>
           <button id="clearButton" type="button">清空</button>
         </div>
+
+        <section class="offline-box offline-mode-only">
+          <label class="field-label" for="offlineInput">输入歌曲链接</label>
+          <textarea id="offlineInput" placeholder="每行一个歌曲链接&#10;支持网易云、QQ音乐、酷狗、酷我、汽水音乐链接"></textarea>
+          <div class="offline-controls">
+            <button id="offlineCheckButton" class="primary" type="button">开始检测</button>
+            <button id="offlineSampleButton" type="button">填入示例</button>
+            <button id="offlineClearButton" type="button">清空</button>
+          </div>
+          <p class="helper-hint">下架检测需要启动本地助手；检测过程使用无头 Chrome / Edge，不会抢鼠标键盘。</p>
+        </section>
       </aside>
 
-      <section class="results">
+      <section class="results link-mode-only">
         <div class="result-head">
           <div>
             <span class="eyebrow">Results</span>
@@ -115,6 +131,50 @@
             <tbody id="resultBody">
               <tr class="empty-row">
                 <td colspan="12">输入关键词后，搜索结果会显示在这里。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="results offline-mode-only">
+        <div class="result-head">
+          <div>
+            <span class="eyebrow">Offline Check</span>
+            <h2>下架检测结果</h2>
+          </div>
+          <div class="actions">
+            <button id="offlineCopyButton" type="button" disabled>复制表格</button>
+            <button id="offlineCsvButton" type="button" disabled>下载 CSV</button>
+            <button id="offlineJsonButton" type="button" disabled>下载 JSON</button>
+          </div>
+        </div>
+
+        <div class="summary offline-summary">
+          <div><strong id="offlineTotalCount">0</strong><span>检测链接</span></div>
+          <div><strong id="offlineDownCount">0</strong><span>已下架</span></div>
+          <div><strong id="offlinePlayableCount">0</strong><span>可播放</span></div>
+          <div><strong id="offlineUnknownCount">0</strong><span>不确定/失败</span></div>
+        </div>
+
+        <div class="notice" id="offlineNotice" hidden></div>
+
+        <div class="table-wrap">
+          <table class="offline-table">
+            <thead>
+              <tr>
+                <th>序号</th>
+                <th>平台</th>
+                <th>状态</th>
+                <th>链接</th>
+                <th>歌曲 ID</th>
+                <th>判断依据</th>
+                <th>耗时</th>
+              </tr>
+            </thead>
+            <tbody id="offlineResultBody">
+              <tr class="empty-row">
+                <td colspan="7">输入歌曲链接后，检测结果会显示在这里。</td>
               </tr>
             </tbody>
           </table>

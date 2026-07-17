@@ -26,8 +26,24 @@ const totalCount = document.querySelector("#totalCount");
 const onlineCount = document.querySelector("#onlineCount");
 const localCount = document.querySelector("#localCount");
 const platformInputs = [...document.querySelectorAll('input[name="platform"]')];
+const linkModeButton = document.querySelector("#linkModeButton");
+const offlineModeButton = document.querySelector("#offlineModeButton");
+const offlineInput = document.querySelector("#offlineInput");
+const offlineCheckButton = document.querySelector("#offlineCheckButton");
+const offlineSampleButton = document.querySelector("#offlineSampleButton");
+const offlineClearButton = document.querySelector("#offlineClearButton");
+const offlineCopyButton = document.querySelector("#offlineCopyButton");
+const offlineCsvButton = document.querySelector("#offlineCsvButton");
+const offlineJsonButton = document.querySelector("#offlineJsonButton");
+const offlineNotice = document.querySelector("#offlineNotice");
+const offlineResultBody = document.querySelector("#offlineResultBody");
+const offlineTotalCount = document.querySelector("#offlineTotalCount");
+const offlineDownCount = document.querySelector("#offlineDownCount");
+const offlinePlayableCount = document.querySelector("#offlinePlayableCount");
+const offlineUnknownCount = document.querySelector("#offlineUnknownCount");
 
 let currentRows = [];
+let currentOfflineRows = [];
 let helperConnected = false;
 
 function selectedPlatforms() {
@@ -80,9 +96,26 @@ function showNotice(text) {
   notice.textContent = text || "";
 }
 
+function showOfflineNotice(text) {
+  offlineNotice.hidden = !text;
+  offlineNotice.textContent = text || "";
+}
+
+function setMode(mode) {
+  const isOffline = mode === "offline";
+  document.body.dataset.mode = isOffline ? "offline" : "link";
+  linkModeButton.classList.toggle("active", !isOffline);
+  offlineModeButton.classList.toggle("active", isOffline);
+}
+
 function setBusy(isBusy) {
   searchButton.disabled = isBusy;
   searchButton.textContent = isBusy ? "搜索中..." : "搜索并回填";
+}
+
+function setOfflineBusy(isBusy) {
+  offlineCheckButton.disabled = isBusy;
+  offlineCheckButton.textContent = isBusy ? "检测中..." : "开始检测";
 }
 
 function createLink(url) {
@@ -179,6 +212,144 @@ function renderRows(rows) {
   localCount.textContent = String(rows.filter((row) => row.source === "local").length);
   copyButton.disabled = rows.length === 0;
   downloadButton.disabled = rows.length === 0;
+}
+
+function parseOfflineLinks() {
+  const seen = new Set();
+  return offlineInput.value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .map((line) => {
+      const matched = line.match(/https?:\/\/[^\s"'<>，。；、]+/i);
+      return matched ? matched[0] : "";
+    })
+    .filter((url) => {
+      if (!url || seen.has(url)) return false;
+      seen.add(url);
+      return true;
+    });
+}
+
+function offlineStatusClass(status) {
+  if (status === "已下架") return "down";
+  if (status === "可播放") return "playable";
+  return "unknown";
+}
+
+function renderOfflineRows(rows) {
+  offlineResultBody.replaceChildren();
+
+  if (rows.length === 0) {
+    const tr = document.createElement("tr");
+    tr.className = "empty-row";
+    tr.innerHTML = '<td colspan="7">输入歌曲链接后，检测结果会显示在这里。</td>';
+    offlineResultBody.append(tr);
+  } else {
+    rows.forEach((row, index) => {
+      const tr = document.createElement("tr");
+      const linkCell = document.createElement("td");
+      if (row.url) linkCell.append(createLink(row.url));
+
+      const badge = document.createElement("span");
+      badge.className = `badge ${offlineStatusClass(row.status)}`;
+      badge.textContent = row.status || "不确定";
+
+      const statusCell = document.createElement("td");
+      statusCell.append(badge);
+
+      const cells = [
+        String(index + 1),
+        row.platform || "",
+        statusCell,
+        linkCell,
+        row.songId || "",
+        row.evidence || "",
+        row.elapsedMs ? `${row.elapsedMs} ms` : "",
+      ];
+
+      for (const value of cells) {
+        if (value instanceof HTMLElement) {
+          tr.append(value);
+        } else {
+          const td = document.createElement("td");
+          td.textContent = value;
+          tr.append(td);
+        }
+      }
+      offlineResultBody.append(tr);
+    });
+  }
+
+  offlineTotalCount.textContent = String(rows.length);
+  offlineDownCount.textContent = String(rows.filter((row) => row.status === "已下架").length);
+  offlinePlayableCount.textContent = String(rows.filter((row) => row.status === "可播放").length);
+  offlineUnknownCount.textContent = String(rows.filter((row) => row.status !== "已下架" && row.status !== "可播放").length);
+  offlineCopyButton.disabled = rows.length === 0;
+  offlineCsvButton.disabled = rows.length === 0;
+  offlineJsonButton.disabled = rows.length === 0;
+}
+
+function serializeOfflineRows(rows) {
+  return rows.map((row, index) => [
+    index + 1,
+    row.platform || "",
+    row.status || "",
+    row.url || "",
+    row.songId || "",
+    row.evidence || "",
+    row.elapsedMs ? `${row.elapsedMs} ms` : "",
+  ]);
+}
+
+function offlineRowsToTsv(rows) {
+  return [
+    ["序号", "平台", "状态", "链接", "歌曲 ID", "判断依据", "耗时"].join("\t"),
+    ...serializeOfflineRows(rows).map((row) => row.join("\t")),
+  ].join("\n");
+}
+
+function offlineRowsToCsv(rows) {
+  return [
+    ["序号", "平台", "状态", "链接", "歌曲 ID", "判断依据", "耗时"].map(csvEscape).join(","),
+    ...serializeOfflineRows(rows).map((row) => row.map(csvEscape).join(",")),
+  ].join("\n");
+}
+
+async function runOfflineCheck() {
+  const links = parseOfflineLinks();
+  if (links.length === 0) {
+    showOfflineNotice("请至少输入一个歌曲链接。");
+    offlineInput.focus();
+    return;
+  }
+
+  if (!helperConnected && !(await checkHelper())) {
+    showOfflineNotice("请先下载并启动本地助手，然后再检测链接是否下架。");
+    return;
+  }
+
+  currentOfflineRows = [];
+  renderOfflineRows(currentOfflineRows);
+  showOfflineNotice("正在检测，部分平台需要打开无头 Chrome / Edge 读取页面，请稍等。");
+  setOfflineBusy(true);
+
+  try {
+    const response = await fetch(`${LOCAL_HELPER}/api/offline-check`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ links }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "检测失败");
+
+    currentOfflineRows = data.results || [];
+    renderOfflineRows(currentOfflineRows);
+    showOfflineNotice(`检测完成：共 ${currentOfflineRows.length} 条。`);
+  } catch (error) {
+    showOfflineNotice(error instanceof Error ? error.message : String(error));
+  } finally {
+    setOfflineBusy(false);
+  }
 }
 
 async function checkHelper() {
@@ -331,6 +502,8 @@ function rowsToCsv(rows) {
 
 searchButton.addEventListener("click", runSearch);
 checkHelperButton.addEventListener("click", checkHelper);
+linkModeButton.addEventListener("click", () => setMode("link"));
+offlineModeButton.addEventListener("click", () => setMode("offline"));
 sampleButton.addEventListener("click", () => {
   queryInput.value = "Bad Girl Good Girl miss A\n无人之岛 任然\n用一生等一人 凯飒";
 });
@@ -353,6 +526,42 @@ downloadButton.addEventListener("click", () => {
   link.click();
   URL.revokeObjectURL(url);
 });
+offlineCheckButton.addEventListener("click", runOfflineCheck);
+offlineSampleButton.addEventListener("click", () => {
+  offlineInput.value = [
+    "https://music.163.com/#/song?id=1805058188",
+    "https://y.qq.com/n/ryqq/songDetail/001Qu4I30eVFYb",
+    "https://www.kuwo.cn/play_detail/263195765",
+  ].join("\n");
+});
+offlineClearButton.addEventListener("click", () => {
+  offlineInput.value = "";
+  currentOfflineRows = [];
+  showOfflineNotice("");
+  renderOfflineRows(currentOfflineRows);
+});
+offlineCopyButton.addEventListener("click", async () => {
+  await navigator.clipboard.writeText(offlineRowsToTsv(currentOfflineRows));
+  showOfflineNotice("已复制下架检测表格。");
+});
+offlineCsvButton.addEventListener("click", () => {
+  const blob = new Blob(["\ufeff", offlineRowsToCsv(currentOfflineRows)], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "music-offline-check-results.csv";
+  link.click();
+  URL.revokeObjectURL(url);
+});
+offlineJsonButton.addEventListener("click", () => {
+  const blob = new Blob([JSON.stringify(currentOfflineRows, null, 2)], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "music-offline-check-results.json";
+  link.click();
+  URL.revokeObjectURL(url);
+});
 platformInputs.forEach((input) => {
   input.addEventListener("change", () => {
     const hasLocal = selectedPlatforms().some((platform) => LOCAL_PLATFORMS.has(platform));
@@ -360,5 +569,7 @@ platformInputs.forEach((input) => {
   });
 });
 
+setMode("link");
 renderRows([]);
+renderOfflineRows([]);
 checkHelper();
