@@ -940,6 +940,14 @@ async function checkKugouOfflineApi(hash, sourceUrl) {
         Referer: sourceUrl || "https://www.kugou.com/",
       },
     });
+    const duration = Number(data.timeLength || 0);
+    const fileSize = Number(data.fileSize || 0);
+    if (Number(data.status) === 1 && duration > 0 && duration <= 30 && fileSize > 0 && fileSize < 700000) {
+      return {
+        status: "已下架",
+        evidence: `酷狗接口仅返回 ${duration} 秒短音频片段，网页端不可完整播放：${clipEvidence(data.fileName || data.songName || hash)}`,
+      };
+    }
     if (Number(data.status) === 1 && (data.url || data.backup_url?.length || data.songName || data.fileName)) {
       return {
         status: "可播放",
@@ -1056,12 +1064,13 @@ async function dumpOfflineDom(url, platformKey) {
         expression: `(() => ({
           html: document.documentElement ? document.documentElement.outerHTML : '',
           text: document.body ? document.body.innerText : '',
-          title: document.title || ''
+          title: document.title || '',
+          probe: Array.isArray(window.__offlineProbeMessages) ? window.__offlineProbeMessages.join('\\n') : ''
         }))()`,
         returnByValue: true,
       });
       const value = result.result?.value || {};
-      return [value.title, value.html, value.text, ...dialogMessages].filter(Boolean).join("\n");
+      return [value.title, value.html, value.text, value.probe, ...dialogMessages].filter(Boolean).join("\n");
     } finally {
       client.close();
     }
@@ -1132,7 +1141,8 @@ async function checkOfflineOne(url) {
   const detected = detectOfflinePlatform(url);
   try {
     const apiVerdict = await checkOfflineByPlatformApi(detected, url);
-    if (apiVerdict) {
+    const shouldConfirmWithPage = detected.key === "kugou" && apiVerdict?.status === "可播放";
+    if (apiVerdict && !shouldConfirmWithPage) {
       return {
         url,
         platform: detected.name,
@@ -1147,13 +1157,17 @@ async function checkOfflineOne(url) {
     const html = await dumpOfflineDom(url, detected.key);
     const text = htmlToPlainText(html);
     const verdict = judgeOfflineStatus(detected.key, html, text);
+    const finalVerdict =
+      shouldConfirmWithPage && verdict.status !== "已下架"
+        ? apiVerdict
+        : verdict;
     return {
       url,
       platform: detected.name,
       platformKey: detected.key,
       songId: detected.id,
-      status: verdict.status,
-      evidence: verdict.evidence,
+      status: finalVerdict.status,
+      evidence: finalVerdict.evidence,
       elapsedMs: Date.now() - started,
     };
   } catch (error) {
@@ -2238,11 +2252,11 @@ async function handleLocalStatus(_req, res) {
   sendJson(res, 200, {
     ok: true,
     name: "歌曲链接回填本地助手",
-    version: "cloud-hybrid-5",
+    version: "cloud-hybrid-6",
     features: {
       search: true,
       offlineCheck: true,
-      offlineCheckVersion: 4,
+      offlineCheckVersion: 5,
     },
     platforms: {
       qq: {
