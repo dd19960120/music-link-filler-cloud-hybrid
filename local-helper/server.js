@@ -820,8 +820,9 @@ const offlinePagePatterns = {
     /暂无版权|因合作方要求.*?暂时无法播放|该歌曲暂时无法播放|歌曲已下架|资源不存在|版权保护/i,
   ],
   qq: [
-    /您查看的歌曲已下架|歌曲已下架|该歌曲不存在|很抱歉.*?已下架|无法播放/i,
-    /mod_data_stat|mod_empty|icon_txt|feedback.*?平台/i,
+    /您查看的歌曲已下架|歌曲已下架|该歌曲不存在|很抱歉.*?(?:已下架|无法播放)|无法播放|暂无版权/i,
+    /(?:mod_data_stat|mod_empty|icon_txt|feedback.*?平台)[\s\S]{0,180}(?:已下架|不存在|无法播放|暂无版权|很抱歉)/i,
+    /(?:已下架|不存在|无法播放|暂无版权|很抱歉)[\s\S]{0,180}(?:mod_data_stat|mod_empty|icon_txt|feedback.*?平台)/i,
   ],
   kugou: [/此音乐暂时不能播放|此音乐暂时不能播放|获取数据失败|歌曲不存在|资源不存在|暂无版权|已下架|无法播放|暂时不能播放/i],
   kuwo: [/歌曲不存在|暂无版权|版权原因|已下架|无法播放|暂时不能播放|资源不存在|播放失败/i],
@@ -831,7 +832,10 @@ const offlinePagePatterns = {
 
 const playablePagePatterns = {
   netease: [/data-res-action=["']play["']/i, /class=["'][^"']*(?:u-btni-play|btn-play|ply)[^"']*["']/i],
-  qq: [/class=["'][^"']*(?:mod_song_info|song_detail__info|data__name|songlist__songname)[^"']*["']/i],
+  qq: [
+    /class=["'][^"']*(?:mod_song_info|song_detail__info|data__name|songlist__songname)[^"']*["']/i,
+    /class=["'][^"']*(?:btn_green|btn__play)[^"']*["'][^>]*(?:播放|play)/i,
+  ],
   kugou: [/class=["'][^"']*(?:audio|player|playBtn|btn_play)[^"']*["']/i, /下载这首歌|酷狗音乐/i],
   kuwo: [/class=["'][^"']*(?:player|play|song)[^"']*["']/i, /立即播放|酷我音乐/i],
   qishui: [],
@@ -2252,11 +2256,11 @@ async function handleLocalStatus(_req, res) {
   sendJson(res, 200, {
     ok: true,
     name: "歌曲链接回填本地助手",
-    version: "cloud-hybrid-6",
+    version: "cloud-hybrid-7",
     features: {
       search: true,
       offlineCheck: true,
-      offlineCheckVersion: 5,
+      offlineCheckVersion: 6,
     },
     platforms: {
       qq: {
