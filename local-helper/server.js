@@ -815,12 +815,13 @@ const offlinePlatformRules = [
 
 const offlinePagePatterns = {
   netease: [
-    /暂无版权|因合作方要求.*?暂时无法播放|该歌曲暂时无法播放|歌曲已下架|资源不存在|播放按钮.*?disabled/i,
-    /u-btni-play-dis|ply-dis|btn-dis/i,
+    /播放按钮.*?disabled/i,
+    /u-btni-play-dis|ply-dis|disabled[^>]+播放/i,
+    /暂无版权|因合作方要求.*?暂时无法播放|该歌曲暂时无法播放|歌曲已下架|资源不存在|版权保护/i,
   ],
   qq: [
-    /您查看的歌曲已下架|歌曲已下架|该歌曲不存在|很抱歉.*?无法播放|无法播放|暂无版权/i,
-    /mod_empty|feedback.*?平台/i,
+    /您查看的歌曲已下架|歌曲已下架|该歌曲不存在|很抱歉.*?已下架|无法播放/i,
+    /mod_data_stat|mod_empty|icon_txt|feedback.*?平台/i,
   ],
   kugou: [/此音乐暂时不能播放|获取数据失败|歌曲不存在|资源不存在|暂无版权|已下架|无法播放/i],
   kuwo: [/歌曲不存在|暂无版权|版权原因|已下架|无法播放|暂时不能播放|资源不存在|播放失败/i],
@@ -834,7 +835,7 @@ const playablePagePatterns = {
   kugou: [/class=["'][^"']*(?:audio|player|playBtn|btn_play)[^"']*["']/i, /下载这首歌|酷狗音乐/i],
   kuwo: [/class=["'][^"']*(?:player|play|song)[^"']*["']/i, /立即播放|酷我音乐/i],
   qishui: [/进入汽水音乐|class=["'][^"']*(?:player|music-player|play)[^"']*["']/i],
-  other: [/播放|评论|收藏|歌手|专辑/i],
+  other: [],
 };
 
 function normalizeOfflineLinks(input) {
@@ -1010,8 +1011,10 @@ async function dumpOfflineDom(url, platformKey) {
     try {
       await client.send("Page.enable");
       await client.send("Runtime.enable");
+      const loadEvent = client.waitFor("Page.loadEventFired", 12000).catch(() => null);
       await client.send("Page.navigate", { url: normalizeOfflineUrlForChrome(url, platformKey) });
-      await sleep(platformKey === "qishui" ? 6500 : 4500);
+      await Promise.race([loadEvent, sleep(12000)]);
+      await sleep(platformKey === "qishui" ? 3500 : 2500);
       const result = await client.send("Runtime.evaluate", {
         expression: "document.documentElement ? document.documentElement.outerHTML : ''",
         returnByValue: true,
@@ -1056,9 +1059,13 @@ function judgeOfflineStatus(platformKey, html, text) {
     if (matched) return { status: "已下架", evidence: `命中下架特征：${clipEvidence(matched[0])}` };
   }
 
-  const playable = [...(playablePagePatterns[platformKey] || []), ...playablePagePatterns.other];
+  if (platformKey === "netease" && /class=["'][^"']*(?:u-btni-play-dis|btn-dis|disabled)[^"']*["'][\s\S]{0,200}播放/i.test(html)) {
+    return { status: "已下架", evidence: "网易云播放按钮为禁用状态" };
+  }
+
+  const playable = playablePagePatterns[platformKey] || playablePagePatterns.other;
   for (const pattern of playable) {
-    const matched = source.match(pattern);
+    const matched = html.match(pattern) || text.match(pattern);
     if (matched) return { status: "可播放", evidence: `未命中下架提示，命中可播放页面特征：${clipEvidence(matched[0])}` };
   }
 
@@ -1215,6 +1222,7 @@ function connectCdp(wsUrl) {
     const ws = new WebSocket(wsUrl);
     let id = 0;
     const pending = new Map();
+    const waiters = new Map();
 
     ws.addEventListener("open", () => {
       resolve({
@@ -1224,6 +1232,15 @@ function connectCdp(wsUrl) {
           ws.send(JSON.stringify({ id: currentId, method, params }));
           return new Promise((innerResolve, innerReject) => {
             pending.set(currentId, { resolve: innerResolve, reject: innerReject });
+          });
+        },
+        waitFor(method, timeoutMs = 15000) {
+          return new Promise((innerResolve, innerReject) => {
+            const timer = setTimeout(() => {
+              waiters.delete(method);
+              innerReject(new Error(`${method} 等待超时`));
+            }, timeoutMs);
+            waiters.set(method, { resolve: innerResolve, timer });
           });
         },
         close() {
@@ -1240,6 +1257,16 @@ function connectCdp(wsUrl) {
       pending.delete(message.id);
       if (message.error) callbacks.reject(new Error(message.error.message));
       else callbacks.resolve(message.result);
+    });
+
+    ws.addEventListener("message", (event) => {
+      const message = JSON.parse(event.data);
+      if (!message.method || !waiters.has(message.method)) return;
+
+      const waiter = waiters.get(message.method);
+      waiters.delete(message.method);
+      clearTimeout(waiter.timer);
+      waiter.resolve(message.params || {});
     });
 
     ws.addEventListener("error", () => reject(new Error("无法连接 QQ 浏览器调试端口")));
@@ -2156,10 +2183,11 @@ async function handleLocalStatus(_req, res) {
   sendJson(res, 200, {
     ok: true,
     name: "歌曲链接回填本地助手",
-    version: "cloud-hybrid-2",
+    version: "cloud-hybrid-3",
     features: {
       search: true,
       offlineCheck: true,
+      offlineCheckVersion: 2,
     },
     platforms: {
       qq: {
