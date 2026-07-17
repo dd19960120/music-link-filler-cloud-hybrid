@@ -395,7 +395,7 @@ async function checkHelper() {
     });
     const data = await response.json();
     helperConnected = response.ok && data.ok;
-    helperSupportsOffline = Boolean(data.features?.offlineCheck && Number(data.features?.offlineCheckVersion || 0) >= 7);
+    helperSupportsOffline = Boolean(data.features?.offlineCheck && Number(data.features?.offlineCheckVersion || 0) >= 8);
     helperStatus.textContent = helperConnected
       ? `已连接：${data.name || "本地助手"}${helperSupportsOffline ? "" : "（旧版，请更新）"}`
       : "未连接";

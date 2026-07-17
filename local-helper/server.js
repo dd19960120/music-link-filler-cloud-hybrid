@@ -950,25 +950,44 @@ async function checkQqOfflineApi(songIdOrMid) {
     const songinfo = data.songinfo || {};
     const track = songinfo.data?.track_info;
 
-    if (track?.id && (track.mid || track.name)) {
-      const singers = Array.isArray(track.singer)
-        ? track.singer.map((item) => item.name).filter(Boolean).join(" / ")
-        : "";
-      const title = [track.name, singers].filter(Boolean).join(" - ");
-      return {
-        status: "可播放",
-        evidence: `QQ接口返回有效歌曲详情：${clipEvidence(title || track.mid || value)}`,
-      };
-    }
-
-    if (Number(songinfo.code || 0) !== 0 || songinfo.data === null) {
+    if (!track?.mid || Number(songinfo.code || 0) !== 0 || songinfo.data === null) {
       return {
         status: "已下架",
         evidence: `QQ接口未返回有效歌曲详情${songinfo.code !== undefined ? ` code=${songinfo.code}` : ""}`,
       };
     }
 
-    return null;
+    const singers = Array.isArray(track.singer)
+      ? track.singer.map((item) => item.name).filter(Boolean).join(" / ")
+      : "";
+    const title = [track.name, singers].filter(Boolean).join(" - ") || track.mid || value;
+    const playData = await fetchQqMusicu({
+      req_0: {
+        module: "vkey.GetVkeyServer",
+        method: "CgiGetVkey",
+        param: {
+          guid: "10000",
+          songmid: [track.mid],
+          songtype: [0],
+          uin: "0",
+          loginflag: 1,
+          platform: "20",
+        },
+      },
+      comm: { uin: "0", format: "json", ct: 24, cv: 0 },
+    });
+    const playInfo = playData.req_0?.data?.midurlinfo?.[0] || {};
+    if (playInfo.purl || playInfo.vkey) {
+      return {
+        status: "可播放",
+        evidence: `QQ播放接口返回可播放地址：${clipEvidence(title)}`,
+      };
+    }
+
+    return {
+      status: "已下架",
+      evidence: `QQ播放接口未返回可播放地址${playInfo.result !== undefined ? ` result=${playInfo.result}` : ""}：${clipEvidence(title)}`,
+    };
   } catch {
     return null;
   }
@@ -2300,11 +2319,11 @@ async function handleLocalStatus(_req, res) {
   sendJson(res, 200, {
     ok: true,
     name: "歌曲链接回填本地助手",
-    version: "cloud-hybrid-8",
+    version: "cloud-hybrid-9",
     features: {
       search: true,
       offlineCheck: true,
-      offlineCheckVersion: 7,
+      offlineCheckVersion: 8,
     },
     platforms: {
       qq: {
