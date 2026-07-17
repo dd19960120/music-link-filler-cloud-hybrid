@@ -18,6 +18,7 @@ const clearButton = document.querySelector("#clearButton");
 const copyButton = document.querySelector("#copyButton");
 const downloadButton = document.querySelector("#downloadButton");
 const checkHelperButton = document.querySelector("#checkHelperButton");
+const openHelperButton = document.querySelector("#openHelperButton");
 const helperStatus = document.querySelector("#helperStatus");
 const resultBody = document.querySelector("#resultBody");
 const rowTemplate = document.querySelector("#rowTemplate");
@@ -46,6 +47,22 @@ let currentRows = [];
 let currentOfflineRows = [];
 let helperConnected = false;
 let helperSupportsOffline = false;
+
+function showStartupError(message) {
+  const target = document.querySelector("#notice") || document.querySelector("#offlineNotice") || document.querySelector("#helperStatus");
+  if (!target) return;
+  target.hidden = false;
+  target.textContent = message;
+}
+
+window.addEventListener("error", (event) => {
+  showStartupError(`页面脚本出错：${event.message || "未知错误"}。请按 Ctrl + F5 强制刷新后重试。`);
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+  const reason = event.reason instanceof Error ? event.reason.message : String(event.reason || "未知错误");
+  showStartupError(`页面操作失败：${reason}`);
+});
 
 function selectedPlatforms() {
   return platformInputs.filter((item) => item.checked).map((item) => item.value);
@@ -369,9 +386,13 @@ async function runOfflineCheck() {
 
 async function checkHelper() {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 1800);
+  const timeout = setTimeout(() => controller.abort(), 5000);
+  helperStatus.textContent = "正在连接本地助手...";
   try {
-    const response = await fetch(`${LOCAL_HELPER}/api/status`, { signal: controller.signal });
+    const response = await fetch(`${LOCAL_HELPER}/api/status?t=${Date.now()}`, {
+      cache: "no-store",
+      signal: controller.signal,
+    });
     const data = await response.json();
     helperConnected = response.ok && data.ok;
     helperSupportsOffline = Boolean(data.features?.offlineCheck && Number(data.features?.offlineCheckVersion || 0) >= 7);
@@ -381,7 +402,7 @@ async function checkHelper() {
   } catch {
     helperConnected = false;
     helperSupportsOffline = false;
-    helperStatus.textContent = "未连接，请下载并启动本地助手";
+    helperStatus.textContent = "未连接：请确认本地助手窗口正在运行，或直接访问 http://127.0.0.1:5178/";
   } finally {
     clearTimeout(timeout);
   }
@@ -518,7 +539,20 @@ function rowsToCsv(rows) {
 }
 
 searchButton.addEventListener("click", runSearch);
-checkHelperButton.addEventListener("click", checkHelper);
+checkHelperButton.addEventListener("click", async () => {
+  const ok = await checkHelper();
+  if (!ok) showNotice("没有连上本地助手。请确认助手窗口没有关闭，或打开 http://127.0.0.1:5178/ 检查。");
+});
+openHelperButton?.addEventListener("click", () => {
+  helperStatus.textContent = "正在打开本地助手控制台...";
+  const opened = window.open(LOCAL_HELPER, "_blank", "noopener,noreferrer");
+  if (!opened) {
+    helperStatus.textContent = `浏览器拦截了新窗口，请在地址栏手动打开：${LOCAL_HELPER}`;
+    showNotice(`浏览器拦截了本地助手窗口，请手动打开：${LOCAL_HELPER}`);
+    return;
+  }
+  setTimeout(checkHelper, 800);
+});
 linkModeButton.addEventListener("click", () => setMode("link"));
 offlineModeButton.addEventListener("click", () => setMode("offline"));
 sampleButton.addEventListener("click", () => {
