@@ -927,32 +927,29 @@ async function checkKuwoOfflineApi(songId) {
   }
 }
 
-function extractKugouAlbumId(url) {
-  const decoded = decodeURIComponent(String(url || ""));
-  const matched = decoded.match(/(?:album_id|albumid|albumId)=([0-9]+)/i);
-  return matched?.[1] || "";
-}
-
 async function checkKugouOfflineApi(hash, sourceUrl) {
   try {
-    const url = new URL("https://wwwapi.kugou.com/yy/index.php");
-    const albumId = extractKugouAlbumId(sourceUrl);
+    const url = new URL("https://m.kugou.com/app/i/getSongInfo.php");
     url.search = new URLSearchParams({
-      r: "play/getdata",
+      cmd: "playInfo",
       hash,
-      ...(albumId ? { album_id: albumId } : {}),
     });
     const data = await fetchJson(url.toString(), {
       timeoutMs: 9000,
-      headers: { Referer: "https://www.kugou.com/" },
+      headers: {
+        Referer: sourceUrl || "https://www.kugou.com/",
+      },
     });
-    if (Number(data.status) === 1 && data.data && (data.data.play_url || data.data.audio_name || data.data.song_name)) {
-      return { status: "可播放", evidence: "酷狗播放接口返回了歌曲播放数据" };
+    if (Number(data.status) === 1 && (data.url || data.backup_url?.length || data.songName || data.fileName)) {
+      return {
+        status: "可播放",
+        evidence: `酷狗接口返回可播放歌曲：${clipEvidence(data.fileName || data.songName || hash)}`,
+      };
     }
-    if (Number(data.status) === 0 || data.err_code) {
+    if (Number(data.status) === 0 && (data.error || !data.songName)) {
       return {
         status: "已下架",
-        evidence: `酷狗播放接口返回不可播放${data.err_code ? ` err_code=${data.err_code}` : ""}`,
+        evidence: `酷狗接口返回不可播放${data.error ? `：${data.error}` : ""}`,
       };
     }
     return null;
@@ -2241,11 +2238,11 @@ async function handleLocalStatus(_req, res) {
   sendJson(res, 200, {
     ok: true,
     name: "歌曲链接回填本地助手",
-    version: "cloud-hybrid-4",
+    version: "cloud-hybrid-5",
     features: {
       search: true,
       offlineCheck: true,
-      offlineCheckVersion: 3,
+      offlineCheckVersion: 4,
     },
     platforms: {
       qq: {
