@@ -817,28 +817,31 @@ const offlinePagePatterns = {
   netease: [
     /播放按钮.*?disabled/i,
     /u-btni-play-dis|ply-dis|disabled[^>]+播放/i,
-    /暂无版权|因合作方要求.*?暂时无法播放|该歌曲暂时无法播放|歌曲已下架|资源不存在|版权保护/i,
+    /暂无版权|因合作方要求.*?暂时无法播放|该歌曲暂时无法播放|歌曲已下架|资源不存在|版权保护/,
   ],
   qq: [
-    /您查看的歌曲已下架|歌曲已下架|该歌曲不存在|很抱歉.*?(?:已下架|无法播放)|无法播放|暂无版权/i,
-    /(?:mod_data_stat|mod_empty|icon_txt|feedback.*?平台)[\s\S]{0,180}(?:已下架|不存在|无法播放|暂无版权|很抱歉)/i,
-    /(?:已下架|不存在|无法播放|暂无版权|很抱歉)[\s\S]{0,180}(?:mod_data_stat|mod_empty|icon_txt|feedback.*?平台)/i,
+    /您查看的歌曲已下架|歌曲已下架|该歌曲不存在|很抱歉.*?已下架|无法播放/,
+    /(?:mod_data_stat|mod_empty|icon_txt|feedback.*?平台)[\s\S]{0,180}(?:已下架|不存在|无法播放|暂无版权|很抱歉)/,
+    /(?:已下架|不存在|无法播放|暂无版权|很抱歉)[\s\S]{0,180}(?:mod_data_stat|mod_empty|icon_txt|feedback.*?平台)/,
   ],
-  kugou: [/此音乐暂时不能播放|此音乐暂时不能播放|获取数据失败|歌曲不存在|资源不存在|暂无版权|已下架|无法播放|暂时不能播放/i],
+  kugou: [/此音乐暂时不能播放|获取数据失败|歌曲不存在|资源不存在|暂无版权|已下架|无法播放/],
   kuwo: [/歌曲不存在|暂无版权|版权原因|已下架|无法播放|暂时不能播放|资源不存在|播放失败/i],
-  qishui: [/很抱歉.*?暂不支持播放该歌曲|目前暂不支持播放该歌曲|暂不支持播放该歌曲|歌曲不存在|已下架|无法播放|资源不存在/i],
-  other: [/歌曲已下架|已下架|暂时不能播放|暂不支持播放|资源不存在|无法播放|暂无版权|页面不存在|404/i],
+  qishui: [/很抱歉.*?暂不支持播放该歌曲|目前暂不支持播放该歌曲|暂不支持播放该歌曲|歌曲不存在|已下架|无法播放/],
+  other: [/歌曲已下架|已下架|暂时不能播放|暂不支持播放|资源不存在|无法播放|暂无版权/],
 };
 
 const playablePagePatterns = {
-  netease: [/data-res-action=["']play["']/i, /class=["'][^"']*(?:u-btni-play|btn-play|ply)[^"']*["']/i],
+  netease: [
+    /class=["'][^"']*(?:u-btni-play|btn-play|ply)[^"']*["'][^>]*(?!disabled)/i,
+    /data-res-action=["']play["']/i,
+  ],
   qq: [
     /class=["'][^"']*(?:mod_song_info|song_detail__info|data__name|songlist__songname)[^"']*["']/i,
     /class=["'][^"']*(?:btn_green|btn__play)[^"']*["'][^>]*(?:播放|play)/i,
   ],
   kugou: [/class=["'][^"']*(?:audio|player|playBtn|btn_play)[^"']*["']/i, /下载这首歌|酷狗音乐/i],
   kuwo: [/class=["'][^"']*(?:player|play|song)[^"']*["']/i, /立即播放|酷我音乐/i],
-  qishui: [],
+  qishui: [/class=["'][^"']*(?:player|music-player|play)[^"']*["']/i, /进入汽水音乐/],
   other: [],
 };
 
@@ -931,6 +934,46 @@ async function checkKuwoOfflineApi(songId) {
   }
 }
 
+async function checkQqOfflineApi(songIdOrMid) {
+  try {
+    const value = String(songIdOrMid || "").trim();
+    if (!value) return null;
+
+    const isNumericId = /^\d+$/.test(value);
+    const data = await fetchQqMusicu({
+      songinfo: {
+        method: "get_song_detail_yqq",
+        module: "music.pf_song_detail_svr",
+        param: isNumericId ? { song_id: Number(value) } : { song_mid: value },
+      },
+    });
+    const songinfo = data.songinfo || {};
+    const track = songinfo.data?.track_info;
+
+    if (track?.id && (track.mid || track.name)) {
+      const singers = Array.isArray(track.singer)
+        ? track.singer.map((item) => item.name).filter(Boolean).join(" / ")
+        : "";
+      const title = [track.name, singers].filter(Boolean).join(" - ");
+      return {
+        status: "可播放",
+        evidence: `QQ接口返回有效歌曲详情：${clipEvidence(title || track.mid || value)}`,
+      };
+    }
+
+    if (Number(songinfo.code || 0) !== 0 || songinfo.data === null) {
+      return {
+        status: "已下架",
+        evidence: `QQ接口未返回有效歌曲详情${songinfo.code !== undefined ? ` code=${songinfo.code}` : ""}`,
+      };
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 async function checkKugouOfflineApi(hash, sourceUrl) {
   try {
     const url = new URL("https://m.kugou.com/app/i/getSongInfo.php");
@@ -973,6 +1016,7 @@ async function checkKugouOfflineApi(hash, sourceUrl) {
 async function checkOfflineByPlatformApi(detected, sourceUrl) {
   if (!detected.id) return null;
   if (detected.key === "netease") return checkNeteaseOfflineApi(detected.id);
+  if (detected.key === "qq") return checkQqOfflineApi(detected.id);
   if (detected.key === "kuwo") return checkKuwoOfflineApi(detected.id);
   if (detected.key === "kugou") return checkKugouOfflineApi(detected.id, sourceUrl);
   return null;
@@ -2256,11 +2300,11 @@ async function handleLocalStatus(_req, res) {
   sendJson(res, 200, {
     ok: true,
     name: "歌曲链接回填本地助手",
-    version: "cloud-hybrid-7",
+    version: "cloud-hybrid-8",
     features: {
       search: true,
       offlineCheck: true,
-      offlineCheckVersion: 6,
+      offlineCheckVersion: 7,
     },
     platforms: {
       qq: {
