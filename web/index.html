@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>歌曲链接回填工具 - 云端混合版</title>
-    <link rel="stylesheet" href="./styles.css?v=20260723-layout1" />
+    <link rel="stylesheet" href="./styles.css?v=20260723-auth1" />
   </head>
   <body>
     <main class="shell">
@@ -66,6 +66,19 @@
           <button id="clearButton" type="button">清空</button>
         </div>
 
+        <section class="auth-box link-mode-only">
+          <div>
+            <strong>授权表</strong>
+            <p id="authStatus">未导入授权表</p>
+          </div>
+          <div class="auth-actions">
+            <label class="upload-button" for="authFileInput">上传授权表 CSV/TSV</label>
+            <input id="authFileInput" type="file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values" hidden />
+            <button id="clearAuthButton" type="button" disabled>清除授权表</button>
+            <span class="helper-hint">从腾讯文档导出 CSV/TSV 后上传；会按歌曲名、歌手名、版本/备注做粗略匹配，仅作为对外授权提示。</span>
+          </div>
+        </section>
+
         <section class="offline-box offline-mode-only">
           <label class="field-label" for="offlineInput">输入歌曲链接</label>
           <textarea id="offlineInput" placeholder="每行一个歌曲链接&#10;支持网易云、QQ音乐、酷狗、酷我、汽水音乐链接"></textarea>
@@ -112,13 +125,15 @@
                 <th>在听</th>
                 <th>评论</th>
                 <th>转发</th>
+                <th>授权提示</th>
+                <th>授权匹配</th>
                 <th>链接</th>
                 <th>状态</th>
               </tr>
             </thead>
             <tbody id="resultBody">
               <tr class="empty-row">
-                <td colspan="12">输入关键词后，搜索结果会显示在这里。</td>
+                <td colspan="14">输入关键词后，搜索结果会显示在这里。</td>
               </tr>
             </tbody>
           </table>
@@ -194,11 +209,13 @@
         <td class="listen"></td>
         <td class="comment"></td>
         <td class="share"></td>
+        <td class="auth"></td>
+        <td class="auth-match"></td>
         <td class="link"></td>
         <td class="status"></td>
       </tr>
     </template>
 
-    <script src="./app.js?v=20260717-offline10" type="module"></script>
+    <script src="./app.js?v=20260723-auth1" type="module"></script>
   </body>
 </html>

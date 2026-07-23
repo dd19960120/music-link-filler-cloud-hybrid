@@ -17,6 +17,9 @@ const sampleButton = document.querySelector("#sampleButton");
 const clearButton = document.querySelector("#clearButton");
 const copyButton = document.querySelector("#copyButton");
 const downloadButton = document.querySelector("#downloadButton");
+const authFileInput = document.querySelector("#authFileInput");
+const clearAuthButton = document.querySelector("#clearAuthButton");
+const authStatus = document.querySelector("#authStatus");
 const checkHelperButton = document.querySelector("#checkHelperButton");
 const openHelperButton = document.querySelector("#openHelperButton");
 const helperStatus = document.querySelector("#helperStatus");
@@ -45,6 +48,7 @@ const offlineUnknownCount = document.querySelector("#offlineUnknownCount");
 
 let currentRows = [];
 let currentOfflineRows = [];
+let authRecords = [];
 let helperConnected = false;
 let helperSupportsOffline = false;
 
@@ -145,6 +149,144 @@ function createLink(url) {
   return link;
 }
 
+function normalizeText(value) {
+  return String(value || "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/（[^）]*）|\([^)]*\)|【[^】]*】|\[[^\]]*\]/g, "")
+    .replace(/[\s·・,，.。!！?？:：;；"'“”‘’<>《》_\-—/\\|]+/g, "");
+}
+
+function normalizeLoose(value) {
+  return String(value || "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[\s·・,，.。!！?？:：;；"'“”‘’()（）\[\]【】<>《》_\-—/\\|]+/g, "");
+}
+
+function parseDelimitedLine(line, delimiter) {
+  const values = [];
+  let value = "";
+  let quoted = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    const next = line[index + 1];
+    if (char === '"' && quoted && next === '"') {
+      value += '"';
+      index += 1;
+    } else if (char === '"') {
+      quoted = !quoted;
+    } else if (char === delimiter && !quoted) {
+      values.push(value);
+      value = "";
+    } else {
+      value += char;
+    }
+  }
+  values.push(value);
+  return values.map((item) => item.trim());
+}
+
+function pickColumn(headers, patterns) {
+  return headers.findIndex((header) => patterns.some((pattern) => pattern.test(header)));
+}
+
+function parseAuthTable(text) {
+  const normalized = String(text || "").replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const lines = normalized.split("\n").filter((line) => line.trim());
+  if (lines.length < 2) return [];
+  const delimiter = lines.slice(0, 5).join("\n").includes("\t") ? "\t" : ",";
+  const headers = parseDelimitedLine(lines[0], delimiter);
+  const songIndex = pickColumn(headers, [/歌曲名/, /歌名/, /曲名/, /作品名/, /授权歌曲/, /^song$/i, /title/i]);
+  const artistIndex = pickColumn(headers, [/歌手/, /艺人/, /演唱/, /演唱者/, /artist/i, /singer/i]);
+  const versionIndex = pickColumn(headers, [/版本/, /备注/, /说明/, /专辑/, /授权版本/, /version/i, /remark/i, /note/i]);
+  const statusIndex = pickColumn(headers, [/授权状态/, /^状态$/, /是否授权/, /授权/, /status/i]);
+  const scopeIndex = pickColumn(headers, [/对外/, /授权范围/, /可否对外/, /外部/, /使用范围/, /scope/i]);
+
+  return lines
+    .slice(1)
+    .map((line) => parseDelimitedLine(line, delimiter))
+    .map((cols) => {
+      const fallbackSong = cols.find((value) => value && normalizeLoose(value).length >= 2) || "";
+      return {
+        song: cols[songIndex] || fallbackSong,
+        artist: artistIndex >= 0 ? cols[artistIndex] || "" : "",
+        version: versionIndex >= 0 ? cols[versionIndex] || "" : "",
+        status: statusIndex >= 0 ? cols[statusIndex] || "" : "",
+        scope: scopeIndex >= 0 ? cols[scopeIndex] || "" : "",
+      };
+    })
+    .filter((record) => normalizeLoose(record.song));
+}
+
+function authScopeLabel(record) {
+  const text = `${record.status} ${record.scope} ${record.version}`;
+  if (/不对外|不可对外|禁止对外|未授权|不授权|取消|终止|下架|失效/.test(text)) return "需复核";
+  if (/对外授权|可对外|允许对外|外部授权|可外部|允许外部/.test(text)) return "对外授权";
+  return "授权记录";
+}
+
+function scoreAuthMatch(row, record) {
+  const song = normalizeText(row.song?.name);
+  const rawSong = normalizeLoose(row.song?.name);
+  const artist = normalizeLoose(row.song?.artists);
+  const album = normalizeLoose(row.song?.album);
+  const authSong = normalizeText(record.song);
+  const rawAuthSong = normalizeLoose(record.song);
+  const authArtist = normalizeLoose(record.artist);
+  const authVersion = normalizeLoose(record.version);
+
+  if (!song || !authSong) return 0;
+  let score = 0;
+  if (song === authSong || rawSong === rawAuthSong) score += 70;
+  else if (song.includes(authSong) || authSong.includes(song) || rawSong.includes(rawAuthSong) || rawAuthSong.includes(rawSong)) score += 55;
+
+  if (artist && authArtist) {
+    if (artist.includes(authArtist) || authArtist.includes(artist)) score += 22;
+  }
+  if (authVersion && (album.includes(authVersion) || rawSong.includes(authVersion) || authVersion.includes(album))) score += 8;
+  return score;
+}
+
+function matchAuthorization(row) {
+  if (row.error || !row.song) {
+    return { label: "", detail: "", level: "none", score: "" };
+  }
+  if (authRecords.length === 0) {
+    return { label: "未导入", detail: "", level: "none", score: "" };
+  }
+
+  let best = null;
+  for (const record of authRecords) {
+    const score = scoreAuthMatch(row, record);
+    if (!best || score > best.score) best = { record, score };
+  }
+
+  if (!best || best.score < 65) {
+    return { label: "未匹配", detail: "", level: "none", score: "" };
+  }
+
+  const scope = authScopeLabel(best.record);
+  const detailParts = [best.record.song, best.record.artist, best.record.version].filter(Boolean);
+  const detail = `${detailParts.join(" / ")} (${best.score})`;
+  if (scope === "对外授权" && best.score >= 82) {
+    return { label: "已对外授权", detail, level: "ok", score: best.score };
+  }
+  if (scope === "对外授权") {
+    return { label: "疑似对外授权", detail, level: "maybe", score: best.score };
+  }
+  return { label: "需复核", detail, level: "review", score: best.score };
+}
+
+function decorateAuthRows(rows) {
+  return rows.map((row) => ({ ...row, auth: matchAuthorization(row) }));
+}
+
+function refreshAuthRows() {
+  currentRows = decorateAuthRows(currentRows);
+  renderRows(currentRows);
+}
+
 function flattenPlatformResult(result, source) {
   if (result.error) {
     return [
@@ -192,7 +334,7 @@ function renderRows(rows) {
   if (rows.length === 0) {
     const tr = document.createElement("tr");
     tr.className = "empty-row";
-    tr.innerHTML = '<td colspan="12">输入关键词后，搜索结果会显示在这里。</td>';
+    tr.innerHTML = '<td colspan="14">输入关键词后，搜索结果会显示在这里。</td>';
     resultBody.append(tr);
   } else {
     for (const row of rows) {
@@ -216,6 +358,14 @@ function renderRows(rows) {
         node.querySelector(".comment").textContent = statText(row.song.commentCount);
         node.querySelector(".share").textContent = statText(row.song.shareCount);
         if (row.song.link) node.querySelector(".link").append(createLink(row.song.link));
+      }
+      const auth = row.auth || matchAuthorization(row);
+      if (auth.label) {
+        const authBadge = document.createElement("span");
+        authBadge.className = `badge auth-${auth.level || "none"}`;
+        authBadge.textContent = auth.label;
+        node.querySelector(".auth").append(authBadge);
+        node.querySelector(".auth-match").textContent = auth.detail || "";
       }
       const badge = document.createElement("span");
       badge.className = `badge ${row.error ? "error" : row.source === "local" ? "helper" : ""}`;
@@ -491,7 +641,7 @@ async function runSearch() {
   try {
     for (const query of queries) {
       const rows = await searchOne(query, limit, platforms);
-      currentRows.push(...rows);
+      currentRows.push(...decorateAuthRows(rows));
       renderRows(currentRows);
     }
   } catch (error) {
@@ -513,6 +663,8 @@ function serializeRows(rows) {
     statText(row.song?.listenText, row.song?.listenCount),
     statText(row.song?.commentCount),
     statText(row.song?.shareCount),
+    row.auth?.label || "",
+    row.auth?.detail || "",
     row.song?.link || "",
     row.error ? `${row.error} ${row.detail || ""}`.trim() : statusLabel(row),
   ]);
@@ -520,7 +672,7 @@ function serializeRows(rows) {
 
 function rowsToTsv(rows) {
   return [
-    ["输入关键词", "平台", "序号", "歌曲名", "歌手名", "专辑名", "收藏/点赞", "在听", "评论", "转发", "链接", "状态"].join("\t"),
+    ["输入关键词", "平台", "序号", "歌曲名", "歌手名", "专辑名", "收藏/点赞", "在听", "评论", "转发", "授权提示", "授权匹配", "链接", "状态"].join("\t"),
     ...serializeRows(rows).map((row) => row.join("\t")),
   ].join("\n");
 }
@@ -531,7 +683,7 @@ function csvEscape(value) {
 
 function rowsToCsv(rows) {
   return [
-    ["输入关键词", "平台", "序号", "歌曲名", "歌手名", "专辑名", "收藏/点赞", "在听", "评论", "转发", "链接", "状态"]
+    ["输入关键词", "平台", "序号", "歌曲名", "歌手名", "专辑名", "收藏/点赞", "在听", "评论", "转发", "授权提示", "授权匹配", "链接", "状态"]
       .map(csvEscape)
       .join(","),
     ...serializeRows(rows).map((row) => row.map(csvEscape).join(",")),
@@ -539,6 +691,42 @@ function rowsToCsv(rows) {
 }
 
 searchButton.addEventListener("click", runSearch);
+authFileInput?.addEventListener("change", async () => {
+  const file = authFileInput.files?.[0];
+  if (!file) return;
+  if (/\.xlsx?$/i.test(file.name)) {
+    authStatus.textContent = "请先从腾讯文档导出 CSV/TSV 后再上传";
+    showNotice("当前网页端先支持 CSV/TSV 授权表。请在腾讯文档里选择导出为 CSV 或 TSV 后上传。");
+    authFileInput.value = "";
+    return;
+  }
+  try {
+    const text = await file.text();
+    authRecords = parseAuthTable(text);
+    authStatus.textContent = authRecords.length
+      ? `已导入 ${authRecords.length} 条授权记录：${file.name}`
+      : `未识别到授权记录：${file.name}`;
+    clearAuthButton.disabled = authRecords.length === 0;
+    refreshAuthRows();
+    showNotice(
+      authRecords.length
+        ? `授权表已导入 ${authRecords.length} 条，当前结果已重新匹配。提示为粗略匹配，请人工复核版本。`
+        : "没有识别到授权记录，请确认第一行是表头，并包含歌曲名/歌手/授权状态等字段。",
+    );
+  } catch (error) {
+    authStatus.textContent = "授权表读取失败";
+    showNotice(error instanceof Error ? error.message : String(error));
+  } finally {
+    authFileInput.value = "";
+  }
+});
+clearAuthButton?.addEventListener("click", () => {
+  authRecords = [];
+  authStatus.textContent = "未导入授权表";
+  clearAuthButton.disabled = true;
+  refreshAuthRows();
+  showNotice("已清除授权表匹配结果。");
+});
 checkHelperButton.addEventListener("click", async () => {
   const ok = await checkHelper();
   if (!ok) showNotice("没有连上本地助手。请确认助手窗口没有关闭，或打开 http://127.0.0.1:5178/ 检查。");
