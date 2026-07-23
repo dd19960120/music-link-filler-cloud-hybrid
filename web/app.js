@@ -200,7 +200,9 @@ function parseAuthTable(text) {
   const delimiter = lines.slice(0, 5).join("\n").includes("\t") ? "\t" : ",";
   const headers = parseDelimitedLine(lines[0], delimiter);
   const songIndex = pickColumn(headers, [/歌曲名/, /歌名/, /曲名/, /作品名/, /授权歌曲/, /^song$/i, /title/i]);
-  const artistIndex = pickColumn(headers, [/歌手/, /艺人/, /演唱/, /演唱者/, /artist/i, /singer/i]);
+  const originalArtistIndex = pickColumn(headers, [/原唱歌手/, /原唱艺人/, /原唱/, /original/i]);
+  const coverArtistIndex = pickColumn(headers, [/翻唱歌手/, /翻唱艺人/, /翻唱/, /cover/i]);
+  const artistIndex = pickColumn(headers, [/^歌手$/, /^歌手名$/, /^艺人$/, /^艺人名$/, /^演唱$/, /^演唱者$/, /artist/i, /singer/i]);
   const versionIndex = pickColumn(headers, [/版本/, /备注/, /说明/, /专辑/, /授权版本/, /version/i, /remark/i, /note/i]);
   const statusIndex = pickColumn(headers, [/授权状态/, /^状态$/, /是否授权/, /授权/, /status/i]);
   const scopeIndex = pickColumn(headers, [/对外/, /授权范围/, /可否对外/, /外部/, /使用范围/, /scope/i]);
@@ -212,6 +214,8 @@ function parseAuthTable(text) {
       const fallbackSong = cols.find((value) => value && normalizeLoose(value).length >= 2) || "";
       return {
         song: cols[songIndex] || fallbackSong,
+        originalArtist: originalArtistIndex >= 0 ? cols[originalArtistIndex] || "" : "",
+        coverArtist: coverArtistIndex >= 0 ? cols[coverArtistIndex] || "" : "",
         artist: artistIndex >= 0 ? cols[artistIndex] || "" : "",
         version: versionIndex >= 0 ? cols[versionIndex] || "" : "",
         status: statusIndex >= 0 ? cols[statusIndex] || "" : "",
@@ -239,6 +243,10 @@ function authScopeLabel(record) {
   return "授权记录";
 }
 
+function isArtistMatch(resultArtist, authArtist) {
+  return Boolean(resultArtist && authArtist && (resultArtist.includes(authArtist) || authArtist.includes(resultArtist)));
+}
+
 function scoreAuthMatch(row, record) {
   const song = normalizeText(row.song?.name);
   const rawSong = normalizeLoose(row.song?.name);
@@ -246,19 +254,30 @@ function scoreAuthMatch(row, record) {
   const album = normalizeLoose(row.song?.album);
   const authSong = normalizeText(record.song);
   const rawAuthSong = normalizeLoose(record.song);
+  const authOriginalArtist = normalizeLoose(record.originalArtist);
+  const authCoverArtist = normalizeLoose(record.coverArtist);
   const authArtist = normalizeLoose(record.artist);
   const authVersion = normalizeLoose(record.version);
 
-  if (!song || !authSong) return 0;
+  if (!song || !authSong) return { score: 0, artistLabel: "" };
   let score = 0;
+  let artistLabel = "";
   if (song === authSong || rawSong === rawAuthSong) score += 70;
   else if (song.includes(authSong) || authSong.includes(song) || rawSong.includes(rawAuthSong) || rawAuthSong.includes(rawSong)) score += 55;
 
-  if (artist && authArtist) {
-    if (artist.includes(authArtist) || authArtist.includes(artist)) score += 22;
+  if (isArtistMatch(artist, authOriginalArtist)) {
+    score += 24;
+    artistLabel = "原唱歌手";
+  } else if (isArtistMatch(artist, authCoverArtist)) {
+    score += 18;
+    artistLabel = "翻唱歌手";
+  } else if (isArtistMatch(artist, authArtist)) {
+    score += 16;
+    artistLabel = "歌手";
   }
+  if ((authOriginalArtist || authCoverArtist || authArtist) && !artistLabel) score = Math.min(score, 54);
   if (authVersion && (album.includes(authVersion) || rawSong.includes(authVersion) || authVersion.includes(album))) score += 8;
-  return score;
+  return { score, artistLabel };
 }
 
 function matchAuthorization(row) {
@@ -271,8 +290,8 @@ function matchAuthorization(row) {
 
   let best = null;
   for (const record of authRecords) {
-    const score = scoreAuthMatch(row, record);
-    if (!best || score > best.score) best = { record, score };
+    const scored = scoreAuthMatch(row, record);
+    if (!best || scored.score > best.score) best = { record, ...scored };
   }
 
   if (!best || best.score < 65) {
@@ -280,7 +299,10 @@ function matchAuthorization(row) {
   }
 
   const scope = authScopeLabel(best.record);
-  const detailParts = [best.record.song, best.record.artist, best.record.version].filter(Boolean);
+  const artistDetail = best.artistLabel
+    ? `${best.artistLabel}:${best.artistLabel === "原唱歌手" ? best.record.originalArtist : best.artistLabel === "翻唱歌手" ? best.record.coverArtist : best.record.artist}`
+    : best.record.originalArtist || best.record.coverArtist || best.record.artist;
+  const detailParts = [best.record.song, artistDetail, best.record.version].filter(Boolean);
   const detail = `${detailParts.join(" / ")} (${best.score})`;
   if (scope === "对外授权" && best.score >= 82) {
     return { label: "已对外授权", detail, level: "ok", score: best.score };

@@ -75,7 +75,7 @@
             <label class="upload-button" for="authFileInput">上传授权表 CSV/TSV/XLSX</label>
             <input id="authFileInput" type="file" accept=".csv,.tsv,.txt,.xlsx,.xls,text/csv,text/tab-separated-values,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" hidden />
             <button id="clearAuthButton" type="button" disabled>清除授权表</button>
-            <span class="helper-hint">支持上传腾讯文档导出的 CSV/TSV/XLSX；会按歌曲名、歌手名、版本/备注做粗略匹配，仅作为对外授权提示。</span>
+            <span class="helper-hint">支持上传腾讯文档导出的 CSV/TSV/XLSX；会按歌曲名、原唱歌手优先、再翻唱歌手、版本/备注做粗略匹配，仅作为对外授权提示。</span>
           </div>
         </section>
 
@@ -219,6 +219,6 @@
     </template>
 
     <script src="./vendor/xlsx.full.min.js?v=20260723-xlsx1"></script>
-    <script src="./app.js?v=20260723-xlsx1" type="module"></script>
+    <script src="./app.js?v=20260723-auth-artist1" type="module"></script>
   </body>
 </html>
