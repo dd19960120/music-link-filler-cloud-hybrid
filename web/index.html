@@ -72,10 +72,10 @@
             <p id="authStatus">未导入授权表</p>
           </div>
           <div class="auth-actions">
-            <label class="upload-button" for="authFileInput">上传授权表 CSV/TSV</label>
-            <input id="authFileInput" type="file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values" hidden />
+            <label class="upload-button" for="authFileInput">上传授权表 CSV/TSV/XLSX</label>
+            <input id="authFileInput" type="file" accept=".csv,.tsv,.txt,.xlsx,.xls,text/csv,text/tab-separated-values,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" hidden />
             <button id="clearAuthButton" type="button" disabled>清除授权表</button>
-            <span class="helper-hint">从腾讯文档导出 CSV/TSV 后上传；会按歌曲名、歌手名、版本/备注做粗略匹配，仅作为对外授权提示。</span>
+            <span class="helper-hint">支持上传腾讯文档导出的 CSV/TSV/XLSX；会按歌曲名、歌手名、版本/备注做粗略匹配，仅作为对外授权提示。</span>
           </div>
         </section>
 
@@ -100,6 +100,7 @@
           <div class="actions">
             <button id="copyButton" type="button" disabled>复制表格</button>
             <button id="downloadButton" type="button" disabled>下载 CSV</button>
+            <button id="downloadXlsxButton" type="button" disabled>下载 XLSX</button>
           </div>
         </div>
 
@@ -149,6 +150,7 @@
           <div class="actions">
             <button id="offlineCopyButton" type="button" disabled>复制表格</button>
             <button id="offlineCsvButton" type="button" disabled>下载 CSV</button>
+            <button id="offlineXlsxButton" type="button" disabled>下载 XLSX</button>
             <button id="offlineJsonButton" type="button" disabled>下载 JSON</button>
           </div>
         </div>
@@ -216,6 +218,7 @@
       </tr>
     </template>
 
-    <script src="./app.js?v=20260723-auth1" type="module"></script>
+    <script src="./vendor/xlsx.full.min.js?v=20260723-xlsx1"></script>
+    <script src="./app.js?v=20260723-xlsx1" type="module"></script>
   </body>
 </html>

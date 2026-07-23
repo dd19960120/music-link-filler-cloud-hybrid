@@ -17,6 +17,7 @@ const sampleButton = document.querySelector("#sampleButton");
 const clearButton = document.querySelector("#clearButton");
 const copyButton = document.querySelector("#copyButton");
 const downloadButton = document.querySelector("#downloadButton");
+const downloadXlsxButton = document.querySelector("#downloadXlsxButton");
 const authFileInput = document.querySelector("#authFileInput");
 const clearAuthButton = document.querySelector("#clearAuthButton");
 const authStatus = document.querySelector("#authStatus");
@@ -38,6 +39,7 @@ const offlineSampleButton = document.querySelector("#offlineSampleButton");
 const offlineClearButton = document.querySelector("#offlineClearButton");
 const offlineCopyButton = document.querySelector("#offlineCopyButton");
 const offlineCsvButton = document.querySelector("#offlineCsvButton");
+const offlineXlsxButton = document.querySelector("#offlineXlsxButton");
 const offlineJsonButton = document.querySelector("#offlineJsonButton");
 const offlineNotice = document.querySelector("#offlineNotice");
 const offlineResultBody = document.querySelector("#offlineResultBody");
@@ -219,6 +221,17 @@ function parseAuthTable(text) {
     .filter((record) => normalizeLoose(record.song));
 }
 
+function parseAuthWorkbook(buffer) {
+  if (!window.XLSX) throw new Error("Excel 解析库没有加载成功，请刷新页面后重试。");
+  const workbook = window.XLSX.read(buffer, { type: "array" });
+  const firstSheetName = workbook.SheetNames[0];
+  if (!firstSheetName) return [];
+  const sheet = workbook.Sheets[firstSheetName];
+  const rows = window.XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+  const text = rows.map((row) => row.map((cell) => String(cell ?? "")).join("\t")).join("\n");
+  return parseAuthTable(text);
+}
+
 function authScopeLabel(record) {
   const text = `${record.status} ${record.scope} ${record.version}`;
   if (/不对外|不可对外|禁止对外|未授权|不授权|取消|终止|下架|失效/.test(text)) return "需复核";
@@ -380,6 +393,7 @@ function renderRows(rows) {
   localCount.textContent = String(rows.filter((row) => row.source === "local").length);
   copyButton.disabled = rows.length === 0;
   downloadButton.disabled = rows.length === 0;
+  downloadXlsxButton.disabled = rows.length === 0;
 }
 
 function parseOfflineLinks() {
@@ -454,6 +468,7 @@ function renderOfflineRows(rows) {
   offlineUnknownCount.textContent = String(rows.filter((row) => row.status !== "已下架" && row.status !== "可播放").length);
   offlineCopyButton.disabled = rows.length === 0;
   offlineCsvButton.disabled = rows.length === 0;
+  offlineXlsxButton.disabled = rows.length === 0;
   offlineJsonButton.disabled = rows.length === 0;
 }
 
@@ -481,6 +496,15 @@ function offlineRowsToCsv(rows) {
     ["序号", "平台", "状态", "链接", "歌曲 ID", "判断依据", "耗时"].map(csvEscape).join(","),
     ...serializeOfflineRows(rows).map((row) => row.map(csvEscape).join(",")),
   ].join("\n");
+}
+
+function offlineRowsToXlsx(rows) {
+  if (!window.XLSX) throw new Error("Excel 导出库没有加载成功，请刷新页面后重试。");
+  const headers = ["序号", "平台", "状态", "链接", "歌曲 ID", "判断依据", "耗时"];
+  const worksheet = window.XLSX.utils.aoa_to_sheet([headers, ...serializeOfflineRows(rows)]);
+  const workbook = window.XLSX.utils.book_new();
+  window.XLSX.utils.book_append_sheet(workbook, worksheet, "下架检测结果");
+  return window.XLSX.write(workbook, { bookType: "xlsx", type: "array" });
 }
 
 async function runOfflineCheck() {
@@ -690,19 +714,32 @@ function rowsToCsv(rows) {
   ].join("\n");
 }
 
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function rowsToXlsx(rows) {
+  if (!window.XLSX) throw new Error("Excel 导出库没有加载成功，请刷新页面后重试。");
+  const headers = ["输入关键词", "平台", "序号", "歌曲名", "歌手名", "专辑名", "收藏/点赞", "在听", "评论", "转发", "授权提示", "授权匹配", "链接", "状态"];
+  const worksheet = window.XLSX.utils.aoa_to_sheet([headers, ...serializeRows(rows)]);
+  const workbook = window.XLSX.utils.book_new();
+  window.XLSX.utils.book_append_sheet(workbook, worksheet, "回填结果");
+  return window.XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+}
+
 searchButton.addEventListener("click", runSearch);
 authFileInput?.addEventListener("change", async () => {
   const file = authFileInput.files?.[0];
   if (!file) return;
-  if (/\.xlsx?$/i.test(file.name)) {
-    authStatus.textContent = "请先从腾讯文档导出 CSV/TSV 后再上传";
-    showNotice("当前网页端先支持 CSV/TSV 授权表。请在腾讯文档里选择导出为 CSV 或 TSV 后上传。");
-    authFileInput.value = "";
-    return;
-  }
   try {
-    const text = await file.text();
-    authRecords = parseAuthTable(text);
+    authRecords = /\.xlsx?$/i.test(file.name)
+      ? parseAuthWorkbook(await file.arrayBuffer())
+      : parseAuthTable(await file.text());
     authStatus.textContent = authRecords.length
       ? `已导入 ${authRecords.length} 条授权记录：${file.name}`
       : `未识别到授权记录：${file.name}`;
@@ -758,12 +795,16 @@ copyButton.addEventListener("click", async () => {
 });
 downloadButton.addEventListener("click", () => {
   const blob = new Blob(["\ufeff", rowsToCsv(currentRows)], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "music-link-results.csv";
-  link.click();
-  URL.revokeObjectURL(url);
+  downloadBlob(blob, "music-link-results.csv");
+});
+downloadXlsxButton?.addEventListener("click", () => {
+  try {
+    const data = rowsToXlsx(currentRows);
+    const blob = new Blob([data], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    downloadBlob(blob, "music-link-results.xlsx");
+  } catch (error) {
+    showNotice(error instanceof Error ? error.message : String(error));
+  }
 });
 offlineCheckButton.addEventListener("click", runOfflineCheck);
 offlineSampleButton.addEventListener("click", () => {
@@ -785,21 +826,20 @@ offlineCopyButton.addEventListener("click", async () => {
 });
 offlineCsvButton.addEventListener("click", () => {
   const blob = new Blob(["\ufeff", offlineRowsToCsv(currentOfflineRows)], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "music-offline-check-results.csv";
-  link.click();
-  URL.revokeObjectURL(url);
+  downloadBlob(blob, "music-offline-check-results.csv");
+});
+offlineXlsxButton?.addEventListener("click", () => {
+  try {
+    const data = offlineRowsToXlsx(currentOfflineRows);
+    const blob = new Blob([data], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    downloadBlob(blob, "music-offline-check-results.xlsx");
+  } catch (error) {
+    showOfflineNotice(error instanceof Error ? error.message : String(error));
+  }
 });
 offlineJsonButton.addEventListener("click", () => {
   const blob = new Blob([JSON.stringify(currentOfflineRows, null, 2)], { type: "application/json;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "music-offline-check-results.json";
-  link.click();
-  URL.revokeObjectURL(url);
+  downloadBlob(blob, "music-offline-check-results.json");
 });
 platformInputs.forEach((input) => {
   input.addEventListener("change", () => {
