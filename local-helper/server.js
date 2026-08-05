@@ -847,7 +847,7 @@ const offlinePagePatterns = {
     /(?:已下架|不存在|无法播放|暂无版权|很抱歉)[\s\S]{0,180}(?:mod_data_stat|mod_empty|icon_txt|feedback.*?平台)/,
   ],
   kugou: [/此音乐暂时不能播放|获取数据失败|歌曲不存在|资源不存在|暂无版权|已下架|无法播放/],
-  kuwo: [/歌曲不存在|暂无版权|版权原因|已下架|无法播放|暂时不能播放|资源不存在|播放失败/i],
+  kuwo: [/歌曲不存在|暂无版权|版权原因|已下架|无法播放|暂时不能播放|资源不存在|播放失败|暂无相关数据|重新刷新页面/i],
   qishui: [/很抱歉.*?暂不支持播放该歌曲|目前暂不支持播放该歌曲|暂不支持播放该歌曲|歌曲不存在|已下架|无法播放/],
   other: [/歌曲已下架|已下架|暂时不能播放|暂不支持播放|资源不存在|无法播放|暂无版权/],
 };
@@ -862,7 +862,7 @@ const playablePagePatterns = {
     /class=["'][^"']*(?:btn_green|btn__play)[^"']*["'][^>]*(?:播放|play)/i,
   ],
   kugou: [/class=["'][^"']*(?:playBtn|btn_play)[^"']*["']/i, /立即播放|播放全部/i],
-  kuwo: [/class=["'][^"']*(?:player|play|song)[^"']*["']/i, /立即播放|酷我音乐/i],
+  kuwo: [/class=["'][^"']*(?:player|playBtn|btn_play|play-btn)[^"']*["']/i, /立即播放|播放全部/i],
   qishui: [/class=["'][^"']*(?:player|music-player|play)[^"']*["']/i, /进入汽水音乐/],
   other: [],
 };
@@ -966,7 +966,7 @@ async function checkKuwoOfflineApi(songId) {
       timeoutMs: 9000,
       headers: { Referer: `https://www.kuwo.cn/play_detail/${songId}` },
     });
-    if (data.url) return { status: "可播放", evidence: "酷我备用播放接口返回了可用播放地址" };
+    if (data.url) return null;
     if (String(data.code || "") && String(data.code) !== "200") {
       return { status: "已下架", evidence: `酷我备用播放接口返回异常 code=${data.code}${data.msg ? `：${data.msg}` : ""}` };
     }
@@ -2426,11 +2426,11 @@ async function handleLocalStatus(_req, res) {
   sendJson(res, 200, {
     ok: true,
     name: "歌曲链接回填本地助手",
-    version: "cloud-hybrid-10",
+    version: "cloud-hybrid-11",
     features: {
       search: true,
       offlineCheck: true,
-      offlineCheckVersion: 9,
+      offlineCheckVersion: 10,
     },
     platforms: {
       qq: {
