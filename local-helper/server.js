@@ -182,6 +182,28 @@ async function fetchText(url, options = {}) {
   }
 }
 
+async function resolveFinalUrl(url, options = {}) {
+  const { controller, done } = withTimeout(options.timeoutMs || 12000);
+
+  try {
+    const response = await fetch(url, {
+      redirect: "follow",
+      signal: controller.signal,
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        ...(options.headers || {}),
+      },
+    });
+    return response.url || url;
+  } catch {
+    return url;
+  } finally {
+    done();
+  }
+}
+
 function neteaseEapiParams(uri, data) {
   const json = JSON.stringify(data);
   const digest = createHash("md5")
@@ -797,13 +819,13 @@ const offlinePlatformRules = [
     name: "酷狗音乐",
     key: "kugou",
     domains: ["kugou.com", "kg.qq.com"],
-    idPatterns: [/hash=([A-Za-z0-9]+)/i, /song\/([A-Za-z0-9]+)/i, /mixsongid=(\d+)/i],
+    idPatterns: [/hash=([A-Fa-f0-9]{32})/i, /chain=([A-Za-z0-9]+)/i, /share\/([A-Za-z0-9]+)\.html/i, /song\/([A-Za-z0-9]+)/i, /mixsongid=(\d+)/i],
   },
   {
     name: "酷我音乐",
     key: "kuwo",
     domains: ["kuwo.cn"],
-    idPatterns: [/play_detail\/(\d+)/i, /rid=(\d+)/i, /MUSIC_(\d+)/i],
+    idPatterns: [/play_detail\/(\d+)/i, /yinyue\/(\d+)/i, /rid=(\d+)/i, /MUSIC_(\d+)/i],
   },
   {
     name: "汽水音乐",
@@ -839,7 +861,7 @@ const playablePagePatterns = {
     /class=["'][^"']*(?:mod_song_info|song_detail__info|data__name|songlist__songname)[^"']*["']/i,
     /class=["'][^"']*(?:btn_green|btn__play)[^"']*["'][^>]*(?:播放|play)/i,
   ],
-  kugou: [/class=["'][^"']*(?:audio|player|playBtn|btn_play)[^"']*["']/i, /下载这首歌|酷狗音乐/i],
+  kugou: [/class=["'][^"']*(?:playBtn|btn_play)[^"']*["']/i, /立即播放|播放全部/i],
   kuwo: [/class=["'][^"']*(?:player|play|song)[^"']*["']/i, /立即播放|酷我音乐/i],
   qishui: [/class=["'][^"']*(?:player|music-player|play)[^"']*["']/i, /进入汽水音乐/],
   other: [],
@@ -928,10 +950,31 @@ async function checkKuwoOfflineApi(songId) {
     if (String(data.code || "") && String(data.code) !== "200") {
       return { status: "已下架", evidence: `酷我播放接口返回异常 code=${data.code}` };
     }
-    return null;
+  } catch {
+    // Continue to the legacy anti server fallback below.
+  }
+
+  try {
+    const fallback = new URL("https://antiserver.kuwo.cn/anti.s");
+    fallback.search = new URLSearchParams({
+      type: "convert_url3",
+      rid: `MUSIC_${songId}`,
+      format: "mp3",
+      response: "json",
+    });
+    const data = await fetchJson(fallback.toString(), {
+      timeoutMs: 9000,
+      headers: { Referer: `https://www.kuwo.cn/play_detail/${songId}` },
+    });
+    if (data.url) return { status: "可播放", evidence: "酷我备用播放接口返回了可用播放地址" };
+    if (String(data.code || "") && String(data.code) !== "200") {
+      return { status: "已下架", evidence: `酷我备用播放接口返回异常 code=${data.code}${data.msg ? `：${data.msg}` : ""}` };
+    }
   } catch {
     return null;
   }
+
+  return null;
 }
 
 async function checkQqOfflineApi(songIdOrMid) {
@@ -993,12 +1036,60 @@ async function checkQqOfflineApi(songIdOrMid) {
   }
 }
 
+function countKugouBackupUrls(value) {
+  if (Array.isArray(value)) return value.filter(Boolean).length;
+  if (value && typeof value === "object") return Object.values(value).filter(Boolean).length;
+  return value ? 1 : 0;
+}
+
+function extractKugouHashFromText(text) {
+  const source = String(text || "");
+  const patterns = [
+    /hash["']?\s*[:=]\s*["']([A-Fa-f0-9]{32})["']/i,
+    /["']hash["']\s*:\s*["']([A-Fa-f0-9]{32})["']/i,
+    /data-hash=["']([A-Fa-f0-9]{32})["']/i,
+    /hash=([A-Fa-f0-9]{32})/i,
+  ];
+  for (const pattern of patterns) {
+    const matched = source.match(pattern);
+    if (matched?.[1]) return matched[1].toUpperCase();
+  }
+  return "";
+}
+
+async function resolveKugouHash(candidate, sourceUrl) {
+  const value = String(candidate || "").trim();
+  if (/^[A-Fa-f0-9]{32}$/.test(value)) return value.toUpperCase();
+
+  const urls = [];
+  if (sourceUrl) urls.push(sourceUrl);
+  if (value) urls.push(`https://www.kugou.com/share/${encodeURIComponent(value)}.html`);
+
+  for (const url of urls) {
+    try {
+      const finalUrl = await resolveFinalUrl(url, { timeoutMs: 9000, headers: { Referer: "https://www.kugou.com/" } });
+      const html = await fetchText(finalUrl, {
+        timeoutMs: 12000,
+        headers: { Referer: sourceUrl || "https://www.kugou.com/" },
+      });
+      const hash = extractKugouHashFromText(`${finalUrl}\n${html}`);
+      if (hash) return hash;
+    } catch {
+      // Try the next candidate URL.
+    }
+  }
+
+  return "";
+}
+
 async function checkKugouOfflineApi(hash, sourceUrl) {
   try {
+    const resolvedHash = await resolveKugouHash(hash, sourceUrl);
+    if (!resolvedHash) return null;
     const url = new URL("https://m.kugou.com/app/i/getSongInfo.php");
     url.search = new URLSearchParams({
       cmd: "playInfo",
-      hash,
+      hash: resolvedHash,
     });
     const data = await fetchJson(url.toString(), {
       timeoutMs: 9000,
@@ -1008,22 +1099,23 @@ async function checkKugouOfflineApi(hash, sourceUrl) {
     });
     const duration = Number(data.timeLength || 0);
     const fileSize = Number(data.fileSize || 0);
+    const backupCount = countKugouBackupUrls(data.backup_url);
     if (Number(data.status) === 1 && duration > 0 && duration <= 30 && fileSize > 0 && fileSize < 700000) {
       return {
         status: "已下架",
-        evidence: `酷狗接口仅返回 ${duration} 秒短音频片段，网页端不可完整播放：${clipEvidence(data.fileName || data.songName || hash)}`,
+        evidence: `酷狗接口仅返回 ${duration} 秒短音频片段，网页端不可完整播放：${clipEvidence(data.fileName || data.songName || resolvedHash)}`,
       };
     }
-    if (Number(data.status) === 1 && (data.url || data.backup_url?.length || data.songName || data.fileName)) {
+    if (Number(data.status) === 1 && duration > 0 && (data.url || backupCount > 0)) {
       return {
         status: "可播放",
-        evidence: `酷狗接口返回可播放歌曲：${clipEvidence(data.fileName || data.songName || hash)}`,
+        evidence: `酷狗接口返回可播放歌曲：${clipEvidence(data.fileName || data.songName || resolvedHash)}`,
       };
     }
-    if (Number(data.status) === 0 && (data.error || !data.songName)) {
+    if (Number(data.status) === 0 || data.error || (!data.url && duration <= 0 && fileSize <= 0)) {
       return {
         status: "已下架",
-        evidence: `酷狗接口返回不可播放${data.error ? `：${data.error}` : ""}`,
+        evidence: `酷狗接口返回不可播放${data.error ? `：${data.error}` : ""}${data.fileName || data.songName ? `：${clipEvidence(data.fileName || data.songName)}` : ""}`,
       };
     }
     return null;
@@ -1069,6 +1161,9 @@ async function waitForChromeDebugPort(debugPort) {
 function normalizeOfflineUrlForChrome(url, platformKey) {
   if (platformKey === "netease" && url.includes("music.163.com/#/")) {
     return url.replace("music.163.com/#/", "music.163.com/");
+  }
+  if (platformKey === "kuwo") {
+    return url.replace(/kuwo\.cn\/yinyue\/(\d+)/i, "kuwo.cn/play_detail/$1");
   }
   return url;
 }
@@ -1205,9 +1300,21 @@ function cleanBrowserError(stderr) {
 
 async function checkOfflineOne(url) {
   const started = Date.now();
-  const detected = detectOfflinePlatform(url);
+  const initialDetected = detectOfflinePlatform(url);
+  const resolvedUrl = await resolveFinalUrl(url, {
+    timeoutMs: 12000,
+    headers: { Referer: url },
+  });
+  const detected = detectOfflinePlatform(resolvedUrl);
+  if (!detected.id && initialDetected.id) {
+    detected.id = initialDetected.id;
+  }
+  if (detected.key === "other" && initialDetected.key !== "other") {
+    detected.name = initialDetected.name;
+    detected.key = initialDetected.key;
+  }
   try {
-    const apiVerdict = await checkOfflineByPlatformApi(detected, url);
+    const apiVerdict = await checkOfflineByPlatformApi(detected, resolvedUrl || url);
     const shouldConfirmWithPage = detected.key === "kugou" && apiVerdict?.status === "可播放";
     if (apiVerdict && !shouldConfirmWithPage) {
       return {
@@ -1221,7 +1328,7 @@ async function checkOfflineOne(url) {
       };
     }
 
-    const html = await dumpOfflineDom(url, detected.key);
+    const html = await dumpOfflineDom(resolvedUrl || url, detected.key);
     const text = htmlToPlainText(html);
     const verdict = judgeOfflineStatus(detected.key, html, text);
     const finalVerdict =
@@ -2319,11 +2426,11 @@ async function handleLocalStatus(_req, res) {
   sendJson(res, 200, {
     ok: true,
     name: "歌曲链接回填本地助手",
-    version: "cloud-hybrid-9",
+    version: "cloud-hybrid-10",
     features: {
       search: true,
       offlineCheck: true,
-      offlineCheckVersion: 8,
+      offlineCheckVersion: 9,
     },
     platforms: {
       qq: {
