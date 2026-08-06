@@ -149,6 +149,7 @@ async function fetchJson(url, options = {}) {
 
     const text = await response.text();
     const cleaned = text.trim().replace(/^[^(]+\((.*)\);?$/s, "$1");
+    if (!cleaned) throw new Error("接口返回空内容，可能是登录状态失效或平台临时拦截");
 
     try {
       return JSON.parse(cleaned);
@@ -2209,8 +2210,7 @@ async function getQishuiShareData(song, options) {
       data.share_info?.share_link ||
       data.share_info?.link ||
       "";
-    const statsLink = data.share_info?.share_link || descLink || displayLink;
-    const stats = await getQishuiSharePageStats(statsLink, itemId);
+    const stats = qishuiSongStats(data.share_info || data);
 
     return {
       link: displayLink,
@@ -2463,7 +2463,7 @@ async function handleLocalStatus(_req, res) {
   sendJson(res, 200, {
     ok: true,
     name: "歌曲链接回填本地助手",
-    version: "cloud-hybrid-13",
+    version: "cloud-hybrid-14",
     features: {
       search: true,
       offlineCheck: true,
