@@ -20,6 +20,7 @@ const qishuiInstallId = process.env.QISHUI_INSTALL_ID || "7390000000000000000";
 const MAX_RESULTS_PER_PLATFORM = 200;
 const MAX_OFFLINE_CHECK_LINKS = 300;
 const OFFLINE_CHECK_CONCURRENCY = 2;
+let qishuiCookieCache = "";
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -1954,7 +1955,7 @@ function readQishuiDevice() {
 async function readQishuiCookie() {
   try {
     const cookiePath = join(process.env.APPDATA || "", "SodaMusic", "Network", "Cookies");
-    if (!existsSync(cookiePath)) return "";
+    if (!existsSync(cookiePath)) return qishuiCookieCache;
     const { DatabaseSync } = await import("node:sqlite");
     const db = new DatabaseSync(cookiePath, { readOnly: true });
     try {
@@ -1963,15 +1964,17 @@ async function readQishuiCookie() {
           "select host_key, name, value from cookies where host_key like '%qishui.com' or host_key like '%bytedance.com' order by host_key, name",
         )
         .all();
-      return rows
+      const cookie = rows
         .filter((row) => row.name && row.value)
         .map((row) => `${row.name}=${row.value}`)
         .join("; ");
+      if (cookie) qishuiCookieCache = cookie;
+      return cookie || qishuiCookieCache;
     } finally {
       db.close();
     }
   } catch {
-    return "";
+    return qishuiCookieCache;
   }
 }
 
@@ -2426,7 +2429,7 @@ async function handleLocalStatus(_req, res) {
   sendJson(res, 200, {
     ok: true,
     name: "歌曲链接回填本地助手",
-    version: "cloud-hybrid-11",
+    version: "cloud-hybrid-12",
     features: {
       search: true,
       offlineCheck: true,
