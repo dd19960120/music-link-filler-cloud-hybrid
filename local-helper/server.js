@@ -1,5 +1,5 @@
 import { createServer, request as httpRequest } from "node:http";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { createServer as createNetServer } from "node:net";
@@ -20,7 +20,9 @@ const qishuiInstallId = process.env.QISHUI_INSTALL_ID || "7390000000000000000";
 const MAX_RESULTS_PER_PLATFORM = 200;
 const MAX_OFFLINE_CHECK_LINKS = 300;
 const OFFLINE_CHECK_CONCURRENCY = 2;
+const qishuiCookieCachePath = join(__dirname, ".qishui-cookie-cache.json");
 let qishuiCookieCache = "";
+let qishuiCookieSource = "none";
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -1952,10 +1954,41 @@ function readQishuiDevice() {
   }
 }
 
+function readQishuiCookieCacheFile() {
+  if (qishuiCookieCache) return qishuiCookieCache;
+  try {
+    if (!existsSync(qishuiCookieCachePath)) return "";
+    const data = JSON.parse(readFileSync(qishuiCookieCachePath, "utf8"));
+    const cookie = sanitizeCookie(data.cookie);
+    if (!cookie) return "";
+    qishuiCookieCache = cookie;
+    qishuiCookieSource = "file-cache";
+    return cookie;
+  } catch {
+    return "";
+  }
+}
+
+async function writeQishuiCookieCacheFile(cookie) {
+  const cleanCookie = sanitizeCookie(cookie);
+  if (!cleanCookie) return;
+  qishuiCookieCache = cleanCookie;
+  qishuiCookieSource = "live";
+  try {
+    await writeFile(
+      qishuiCookieCachePath,
+      JSON.stringify({ updatedAt: new Date().toISOString(), cookie: cleanCookie }, null, 2),
+      "utf8",
+    );
+  } catch {
+    // Cache is only a convenience. Search can still use the in-memory cookie.
+  }
+}
+
 async function readQishuiCookie() {
   try {
     const cookiePath = join(process.env.APPDATA || "", "SodaMusic", "Network", "Cookies");
-    if (!existsSync(cookiePath)) return qishuiCookieCache;
+    if (!existsSync(cookiePath)) return readQishuiCookieCacheFile();
     const { DatabaseSync } = await import("node:sqlite");
     const db = new DatabaseSync(cookiePath, { readOnly: true });
     try {
@@ -1968,13 +2001,13 @@ async function readQishuiCookie() {
         .filter((row) => row.name && row.value)
         .map((row) => `${row.name}=${row.value}`)
         .join("; ");
-      if (cookie) qishuiCookieCache = cookie;
-      return cookie || qishuiCookieCache;
+      if (cookie) await writeQishuiCookieCacheFile(cookie);
+      return cookie || readQishuiCookieCacheFile();
     } finally {
       db.close();
     }
   } catch {
-    return qishuiCookieCache;
+    return readQishuiCookieCacheFile();
   }
 }
 
@@ -2417,6 +2450,7 @@ async function handleQishuiStatus(_req, res) {
   sendJson(res, 200, {
     hasDevice: Boolean(auto.did && auto.iid),
     hasCookie: Boolean(auto.cookie),
+    cookieSource: qishuiCookieSource,
     didLength: String(auto.did || "").length,
     iidLength: String(auto.iid || "").length,
     cookieLength: String(auto.cookie || "").length,
@@ -2429,7 +2463,7 @@ async function handleLocalStatus(_req, res) {
   sendJson(res, 200, {
     ok: true,
     name: "歌曲链接回填本地助手",
-    version: "cloud-hybrid-12",
+    version: "cloud-hybrid-13",
     features: {
       search: true,
       offlineCheck: true,
@@ -2445,6 +2479,7 @@ async function handleLocalStatus(_req, res) {
         available: Boolean(qishui.did && qishui.iid),
         hasDevice: Boolean(qishui.did && qishui.iid),
         hasCookie: Boolean(qishui.cookie),
+        cookieSource: qishuiCookieSource,
       },
     },
   });
